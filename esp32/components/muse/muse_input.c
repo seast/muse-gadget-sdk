@@ -168,6 +168,11 @@ static void power_off(void)
 
 static void set_asleep(bool asleep, const char *why)
 {
+#if CONFIG_MUSE_CLOCK_SCREEN
+    if (asleep) {
+        muse_ui_set_clock(false);
+    }
+#endif
     if (asleep != muse_state_asleep()) {
         ESP_LOGI(TAG, "%s (%s)", asleep ? "sleeping" : "waking", why);
         muse_state_set_asleep(asleep);
@@ -440,6 +445,9 @@ static void check_sleep(void)
         return;
     }
     if (muse_voice_in_call()) return;
+#if CONFIG_MUSE_CLOCK_SCREEN
+    if (muse_ui_clock()) return;
+#endif
     int after = muse_settings_sleep_s();
     float mode_t;
     if (after && !muse_state_asleep() && muse_state_mode(&mode_t) == MUSE_MODE_IDLE
@@ -590,6 +598,13 @@ static void power_release(void)
 {
     if (!s_power_down) return;
     s_power_down = false;
+#if CONFIG_MUSE_CLOCK_SCREEN
+    if (!s_power_swallow && !muse_ui_clock()) {
+        ESP_LOGI(TAG, "clock (%s)", muse_board->power_button);
+        muse_ui_set_clock(true);
+        s_power_swallow = true;
+    }
+#endif
     if (!s_power_swallow) set_asleep(true, muse_board->power_button);
     s_power_swallow = false;
 }

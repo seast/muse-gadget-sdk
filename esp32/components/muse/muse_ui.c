@@ -63,6 +63,10 @@
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
 #include "muse_review.h"
 #endif
+#if CONFIG_MUSE_CLOCK_SCREEN
+#include "muse_clock_view.h"
+#define CLOCK_AFTER_IDLE_S 3.0f
+#endif
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
 #endif
@@ -2182,6 +2186,59 @@ void muse_ui_request_snapshot(void)
     s_snapshot = true;
 }
 
+#if CONFIG_MUSE_CLOCK_SCREEN
+static volatile bool s_clock_on;
+static bool s_clock_shown;
+static lv_obj_t *s_canvas_parent;
+static int32_t s_canvas_index;
+static int s_saved_px;
+
+void muse_ui_set_clock(bool on)
+{
+    s_clock_on = on;
+}
+
+bool muse_ui_clock(void)
+{
+    return s_clock_on;
+}
+
+static void set_clock_shown(bool on)
+{
+    lv_obj_t *root = muse_clock_view_root();
+    if (on == s_clock_shown || !root || !s_canvas) {
+        return;
+    }
+    s_clock_shown = on;
+    if (on) {
+        lv_anim_delete(s_canvas, move_muse_t);
+        s_canvas_parent = lv_obj_get_parent(s_canvas);
+        s_canvas_index = lv_obj_get_index(s_canvas);
+        s_saved_px = (int)s_muse_src.header.w;
+        muse_clock_view_update();
+        lv_obj_set_parent(s_canvas, muse_clock_view_muse_slot());
+        set_canvas_px(MUSE_PX_W);
+        lv_obj_center(s_canvas);
+        lv_obj_remove_flag(root, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_parent(s_canvas, s_canvas_parent);
+        lv_obj_move_to_index(s_canvas, s_canvas_index);
+        set_canvas_px(s_saved_px);
+        lv_obj_align(s_canvas, LV_ALIGN_CENTER, 0, s_muse_y);
+    }
+    lv_obj_update_layout(s_canvas);
+    s_cells_valid = false;
+    ESP_LOGI(TAG, "clock screen %s", on ? "shown" : "hidden");
+}
+
+static bool clock_wanted(muse_mode_t mode, float mode_t)
+{
+    return s_clock_on && mode == MUSE_MODE_IDLE && mode_t >= CLOCK_AFTER_IDLE_S && !muse_voice_in_call() &&
+           (!s_pair || lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN));
+}
+#endif
+
 static void turn_screen(const muse_board_t *board);
 
 static void frame_tick(lv_timer_t *timer)
@@ -2229,12 +2286,24 @@ static void frame_tick(lv_timer_t *timer)
 #endif
     update_chrome(now);
     if (muse_menu_tick(now)) {
+#if CONFIG_MUSE_CLOCK_SCREEN
+        set_clock_shown(false);
+#endif
         image_hide_locked();
         return;   /* the menu covers the face */
     }
     if (s_image_dsc.data) {
+#if CONFIG_MUSE_CLOCK_SCREEN
+        set_clock_shown(false);
+#endif
         return;   /* the image covers the face */
     }
+#if CONFIG_MUSE_CLOCK_SCREEN
+    set_clock_shown(clock_wanted(mode, mode_t));
+    if (s_clock_shown) {
+        muse_clock_view_update();
+    }
+#endif
     if (s_tv && lv_obj_get_scroll_x(s_tv) != 0) {
         /* Off screen, or sliding to or from settings: hold still so the
          * slide gets the whole frame time. */
@@ -2262,6 +2331,11 @@ static void frame_tick(lv_timer_t *timer)
         s_last_epaper_pose = mode;
     }
 
+#if CONFIG_MUSE_CLOCK_SCREEN
+    if (s_clock_shown) {
+        return;
+    }
+#endif
     update_status(mode, now);
 }
 
@@ -2307,6 +2381,10 @@ static void turn_screen(const muse_board_t *board)
     set_layout();
     xSemaphoreGive(s_image_mutex);
 
+#if CONFIG_MUSE_CLOCK_SCREEN
+    s_clock_shown = false;
+    muse_clock_view_forget();
+#endif
     lv_obj_clean(lv_screen_active());
     lv_obj_clean(lv_layer_top());
     s_canvas = s_mic_icon = s_aux_icon = s_ring = s_bar = NULL;
@@ -2345,6 +2423,9 @@ static void turn_screen(const muse_board_t *board)
     s_last_epaper_pose = MUSE_MODE_COUNT;
 
     build_screen();
+#if CONFIG_MUSE_CLOCK_SCREEN
+    muse_clock_view_build(lv_screen_active(), s_w, s_h);
+#endif
     muse_menu_build(lv_screen_active(), s_w, s_h);
     build_overlays();
     if (s_dark) {
@@ -2372,6 +2453,9 @@ esp_err_t muse_ui_start(void)
     }
     set_layout();
     build_screen();
+#if CONFIG_MUSE_CLOCK_SCREEN
+    muse_clock_view_build(lv_screen_active(), s_w, s_h);
+#endif
     if (s_settings) {
         muse_settings_ui_build(s_settings);
     } else {

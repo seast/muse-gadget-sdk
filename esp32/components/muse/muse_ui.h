@@ -58,6 +58,11 @@ void muse_ui_image_hide(void);
 /* Watcher camera mode: shows an on-screen shutter hint over the live image. */
 void muse_ui_camera_hint(bool visible);
 
+#if CONFIG_MUSE_CLOCK_SCREEN
+void muse_ui_set_clock(bool on);
+bool muse_ui_clock(void);
+#endif
+
 /* Bench testing, from any task: streams the screen over USB serial. */
 void muse_ui_request_snapshot(void);
 #if CONFIG_LV_USE_SNAPSHOT

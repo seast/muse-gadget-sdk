@@ -66,6 +66,15 @@ Muse's sessions need. These are off unless the build's `sdkconfig` (or
   `(default)`. The weather comes from Open-Meteo every 30 minutes, in °C
   (`CONFIG_MUSE_WEATHER_FAHRENHEIT=y` for °F). City names with accented
   letters show boxes: the line's font is Montserrat.
+- `CONFIG_MUSE_CLOCK_SCREEN=y` (needs `CONFIG_MUSE_CLOCK`): a clock screen
+  after the factory firmware's, on key Q. A tap goes from Muse to the clock,
+  then to screen off, then back to Muse; a 2 s hold still powers off. It
+  shows the weekday, date and time with seconds, and with `CONFIG_MUSE_WEATHER`
+  the place, an icon and word for the sky, the temperature, today's high and
+  low (landscape only) and the humidity, with Muse at 64 px in the corner.
+  The clock doesn't sleep. M, the menu and an image from Muse take the screen
+  while they need it, and the clock comes back 3 s after Muse is idle.
+  Checked on a unit in landscape and portrait.
 
 ## Controls
 
@@ -77,7 +86,8 @@ Muse's sessions need. These are off unless the build's `sdkconfig` (or
   the ROM bootloader, as on any S3.
 - L (XL9555 P0.5): turns the speaker on and off.
 - Q (XL9555 P0.6, listed by xiaozhi but unused there): power. A tap turns
-  the screen off or on, a 2 s hold powers off. Its resting level is read at
+  the screen off or on (with `CONFIG_MUSE_CLOCK_SCREEN`, shows the clock
+  first), a 2 s hold powers off. Its resting level is read at
   boot, so either polarity works.
 
 ## Screen

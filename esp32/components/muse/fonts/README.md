@@ -39,3 +39,13 @@ fullwidth forms. It has no Hangul, so Korean shows as boxes with it.
 Noto Sans SC is by Adobe and Google (https://github.com/notofonts/noto-cjk),
 licensed under the SIL Open Font License, version 1.1. This file is a
 conversion of an unaltered subset of the font.
+
+`muse_font_clock_40.c`, `_64.c` and `_84.c` are the clock screen's digits,
+built in only with `CONFIG_MUSE_CLOCK_SCREEN`: Oswald Bold at 40, 64 and 84 px,
+4 bpp, for `-./0123456789:`, with every digit as wide as the widest so the
+time doesn't shift as it changes. `tools/muse/gen_clock_assets.py` regenerates
+them, with the screen's weather icons (`../muse_clock_art.c`).
+
+Oswald is by the Oswald Project Authors (https://github.com/googlefonts/OswaldFont),
+licensed under the SIL Open Font License, version 1.1. These files are
+conversions of an unaltered subset of the font.

@@ -16,14 +16,28 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+typedef enum { MUSE_WEATHER_FROM_MUSE, MUSE_WEATHER_FROM_IP, MUSE_WEATHER_FROM_DEFAULT } muse_weather_from_t;
+
+typedef struct {
+    char place[32];
+    muse_weather_from_t from;
+    float temp, high, low;
+    int humidity;
+    int code;
+    bool day;
+} muse_weather_t;
+
 void muse_weather_start(void);
 void muse_weather_line(char *out, size_t cap);
+bool muse_weather_now(muse_weather_t *out);
+const char *muse_weather_condition(int code);
 
 #ifdef __cplusplus
 }

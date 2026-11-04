@@ -72,6 +72,8 @@ typedef struct {
 
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static char s_line[96];
+static muse_weather_t s_now;
+static bool s_have_now;
 static SemaphoreHandle_t s_answered;
 static char s_reply[512];
 static bool s_replied;
@@ -84,10 +86,23 @@ void muse_weather_line(char *out, size_t cap)
     portEXIT_CRITICAL(&s_lock);
 }
 
-static void set_line(const char *line)
+bool muse_weather_now(muse_weather_t *out)
+{
+    portENTER_CRITICAL(&s_lock);
+    bool have = s_have_now;
+    if (have) {
+        *out = s_now;
+    }
+    portEXIT_CRITICAL(&s_lock);
+    return have;
+}
+
+static void set_weather(const char *line, const muse_weather_t *now)
 {
     portENTER_CRITICAL(&s_lock);
     strlcpy(s_line, line, sizeof(s_line));
+    s_now = *now;
+    s_have_now = true;
     portEXIT_CRITICAL(&s_lock);
 }
 
@@ -242,7 +257,7 @@ static bool ip_place(place_t *out)
     return ok;
 }
 
-static const char *condition(int code)
+const char *muse_weather_condition(int code)
 {
     if (code == 0) return "Clear";
     if (code <= 2) return "Partly cloudy";
@@ -257,12 +272,20 @@ static const char *condition(int code)
     return "";
 }
 
+static double first_number(cJSON *array)
+{
+    cJSON *v = cJSON_GetArrayItem(array, 0);
+    return cJSON_IsNumber(v) ? v->valuedouble : NAN;
+}
+
 static bool fetch_weather(const place_t *p, source_t src)
 {
-    char url[192];
+    char url[320];
     snprintf(url, sizeof(url),
              "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
-             "&current=temperature_2m,weather_code&temperature_unit=" UNIT,
+             "&current=temperature_2m,relative_humidity_2m,weather_code,is_day"
+             "&daily=temperature_2m_max,temperature_2m_min&forecast_days=1&timezone=auto"
+             "&temperature_unit=" UNIT,
              p->lat, p->lon);
     cJSON *json = get_json(url, "open-meteo");
     cJSON *now = cJSON_GetObjectItem(json, "current");
@@ -270,10 +293,23 @@ static bool fetch_weather(const place_t *p, source_t src)
     cJSON *code = cJSON_GetObjectItem(now, "weather_code");
     bool ok = cJSON_IsNumber(temp) && cJSON_IsNumber(code);
     if (ok) {
+        cJSON *humidity = cJSON_GetObjectItem(now, "relative_humidity_2m");
+        cJSON *day = cJSON_GetObjectItem(now, "is_day");
+        cJSON *daily = cJSON_GetObjectItem(json, "daily");
+        muse_weather_t w = {
+            .from = src == SRC_MUSE ? MUSE_WEATHER_FROM_MUSE : src == SRC_IP ? MUSE_WEATHER_FROM_IP : MUSE_WEATHER_FROM_DEFAULT,
+            .temp = (float)temp->valuedouble,
+            .high = (float)first_number(cJSON_GetObjectItem(daily, "temperature_2m_max")),
+            .low = (float)first_number(cJSON_GetObjectItem(daily, "temperature_2m_min")),
+            .humidity = cJSON_IsNumber(humidity) ? (int)lround(humidity->valuedouble) : -1,
+            .code = code->valueint,
+            .day = !cJSON_IsNumber(day) || day->valueint != 0,
+        };
+        strlcpy(w.place, p->name, sizeof(w.place));
         char line[sizeof(s_line)];
         snprintf(line, sizeof(line), "%s %ld" UNIT_MARK " %s%s", p->name, lround(temp->valuedouble),
-                 condition(code->valueint), src == SRC_IP ? " (IP)" : src == SRC_DEFAULT ? " (default)" : "");
-        set_line(line);
+                 muse_weather_condition(code->valueint), src == SRC_IP ? " (IP)" : src == SRC_DEFAULT ? " (default)" : "");
+        set_weather(line, &w);
         ESP_LOGI(TAG, "%s", line);
     }
     cJSON_Delete(json);
