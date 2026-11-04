@@ -296,6 +296,7 @@ static bool fetch_weather(const place_t *p, source_t src)
         cJSON *humidity = cJSON_GetObjectItem(now, "relative_humidity_2m");
         cJSON *day = cJSON_GetObjectItem(now, "is_day");
         cJSON *daily = cJSON_GetObjectItem(json, "daily");
+        cJSON *offset = cJSON_GetObjectItem(json, "utc_offset_seconds");
         muse_weather_t w = {
             .from = src == SRC_MUSE ? MUSE_WEATHER_FROM_MUSE : src == SRC_IP ? MUSE_WEATHER_FROM_IP : MUSE_WEATHER_FROM_DEFAULT,
             .temp = (float)temp->valuedouble,
@@ -304,6 +305,8 @@ static bool fetch_weather(const place_t *p, source_t src)
             .humidity = cJSON_IsNumber(humidity) ? (int)lround(humidity->valuedouble) : -1,
             .code = code->valueint,
             .day = !cJSON_IsNumber(day) || day->valueint != 0,
+            .offset_known = cJSON_IsNumber(offset),
+            .utc_offset_s = cJSON_IsNumber(offset) ? offset->valueint : 0,
         };
         strlcpy(w.place, p->name, sizeof(w.place));
         char line[sizeof(s_line)];

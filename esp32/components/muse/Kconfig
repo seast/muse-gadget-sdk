@@ -461,9 +461,9 @@ menu "Muse"
     config MUSE_CLOCK_TZ
         string "Time zone (POSIX TZ string)"
         depends on MUSE_CLOCK
-        default "UTC0"
+        default "PST8PDT,M3.2.0,M11.1.0"
         help
-            For example "PST8PDT,M3.2.0,M11.1.0" for US Pacific time or
+            US Pacific time (San Jose) unless set, for example "UTC0" or
             "CST-8" for China.
 
     config MUSE_CLOCK_NTP_SERVER

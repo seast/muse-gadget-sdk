@@ -32,6 +32,8 @@ typedef struct {
     int humidity;
     int code;
     bool day;
+    bool offset_known;
+    int utc_offset_s;
 } muse_weather_t;
 
 void muse_weather_start(void);

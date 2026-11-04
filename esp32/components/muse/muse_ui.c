@@ -1844,15 +1844,35 @@ static void set_meter_visible(bool visible)
 #if CONFIG_MUSE_CLOCK
 /* The time, once a time server has set it, and the IP address on Wi-Fi. The
  * time server is asked once Wi-Fi first connects; SNTP keeps it set. */
+static void update_zone(void)
+{
+    static char shown[24];
+    char tz[24];
+    strlcpy(tz, CONFIG_MUSE_CLOCK_TZ, sizeof(tz));
+#if CONFIG_MUSE_WEATHER
+    muse_weather_t w;
+    if (muse_weather_now(&w) && w.from == MUSE_WEATHER_FROM_MUSE && w.offset_known) {
+        int off = -w.utc_offset_s;
+        int a = off < 0 ? -off : off;
+        snprintf(tz, sizeof(tz), "LOC%s%d:%02d", off < 0 ? "-" : "", a / 3600, a % 3600 / 60);
+    }
+#endif
+    if (strcmp(tz, shown) != 0) {
+        strlcpy(shown, tz, sizeof(shown));
+        setenv("TZ", tz, 1);
+        tzset();
+        ESP_LOGI(TAG, "time zone %s", tz);
+    }
+}
+
 static void update_clock(void)
 {
     static bool asked;
+    update_zone();
     muse_wifi_status_t w;
     muse_wifi_status(&w);
     bool online = w.state == MUSE_WIFI_CONNECTED;
     if (online && !asked) {
-        setenv("TZ", CONFIG_MUSE_CLOCK_TZ, 1);
-        tzset();
         esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG(CONFIG_MUSE_CLOCK_NTP_SERVER);
         asked = esp_netif_sntp_init(&cfg) == ESP_OK;
     }
@@ -2333,6 +2353,7 @@ static void frame_tick(lv_timer_t *timer)
 
 #if CONFIG_MUSE_CLOCK_SCREEN
     if (s_clock_shown) {
+        update_power(now);
         return;
     }
 #endif
