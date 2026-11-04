@@ -155,12 +155,14 @@ static_assert(MP3_BUF > MP3_POLL_ROOM + MP3_HOLD, "reads would stall with the MP
 
 /* ---- Voice task <-> session task ---- */
 
-enum cmd_type_t : uint8_t { CMD_CONNECT, CMD_FORGET, CMD_BEGIN, CMD_END, CMD_CANCEL, CMD_TEXT, CMD_TEXT_CANCEL, CMD_WAKE };
+enum cmd_type_t : uint8_t { CMD_CONNECT, CMD_FORGET, CMD_BEGIN, CMD_END, CMD_CANCEL, CMD_TEXT, CMD_TEXT_CANCEL, CMD_WAKE, CMD_ASK };
 
 struct cmd_t {
     cmd_type_t type;
     uint32_t gen;
     char *text;              /* CMD_TEXT: malloc'd, freed by the session task */
+    muse_hatch_ask_cb_t done;
+    void *arg;
 };
 
 struct ev_t {
@@ -243,6 +245,7 @@ struct turn_t {
     uint32_t review;         /* this turn's identity for reply review (typed turns all have gen 0) */
 #endif
     bool text;               /* typed at the console: the reply goes there, unspoken */
+    bool ask;
     bool end_requested, end_sent, chat_posted, acked;
     int64_t dict_id, chat_id;
     int64_t start_us, end_sent_us, chat_us, last_event_us, last_content_us;
@@ -993,8 +996,34 @@ static void turn_reset_streams(void)
     }
 }
 
+static muse_hatch_ask_cb_t s_ask_done;
+static void *s_ask_arg;
+
+static void ask_finish(const char *reply)
+{
+    muse_hatch_ask_cb_t done = s_ask_done;
+    s_ask_done = nullptr;
+    if (done) {
+        done(reply, s_ask_arg);
+    }
+}
+
+static const char *ask_reply(void)
+{
+    for (int i = s_turn.nmsgs - 1; i >= 0 && s_turn.texts; i--) {
+        const char *text = s_turn.texts + i * TEXT_MAX;
+        if (s_turn.msgs[i].len && text[0]) {
+            return text;
+        }
+    }
+    return nullptr;
+}
+
 static void turn_finish(void)
 {
+    if (s_turn.ask) {
+        ask_finish(nullptr);
+    }
     turn_reset_streams();
     s_turn.phase = P_IDLE;
     s_turn.dict_id = s_turn.chat_id = 0;
@@ -1006,7 +1035,9 @@ static void turn_finish(void)
 static void turn_fail(const char *why)
 {
     ESP_LOGW(TAG, "turn failed: %s", why);
-    if (s_turn.text) {
+    if (s_turn.ask) {
+        ask_finish(nullptr);
+    } else if (s_turn.text) {
         muse_hatch_console("error", why, nullptr);
     }
     emit(MUSE_HATCH_EV_ERROR, why);
@@ -1016,7 +1047,9 @@ static void turn_fail(const char *why)
 /* Ends the turn once its reply is in; `complete` is false when it was cut off. */
 static void turn_done(bool complete)
 {
-    if (s_turn.text) {
+    if (s_turn.ask) {
+        ask_finish(ask_reply());
+    } else if (s_turn.text) {
         muse_hatch_console("done", nullptr, "\"messages\":%d,\"complete\":%s", s_turn.nmsgs,
                            complete ? "true" : "false");
     }
@@ -1025,7 +1058,7 @@ static void turn_done(bool complete)
 }
 
 /* Ends any turn in progress and starts a fresh one. False if Hatch can't be reached. */
-static bool turn_start(uint32_t gen, bool text)
+static bool turn_start(uint32_t gen, bool text, bool ask = false)
 {
     if (s_turn.phase != P_IDLE) {
         if (s_turn.text) {
@@ -1046,6 +1079,7 @@ static bool turn_start(uint32_t gen, bool text)
     s_turn.review = muse_review_turn();
 #endif
     s_turn.text = text;
+    s_turn.ask = ask;
     s_turn.tts_msg = -1;
     memset(s_marks, 0, sizeof(s_marks));
     s_reply_shown[0] = '\0';
@@ -1267,14 +1301,14 @@ static void post_chat(const char *text)
 }
 
 /* A typed turn: the text goes straight to the chat. */
-static void text_begin(const char *text)
+static void text_begin(const char *text, bool ask)
 {
-    if (!turn_start(0, true)) {
+    if (!turn_start(0, true, ask)) {
         return;
     }
-    ESP_LOGI(TAG, "typed turn: %u bytes", (unsigned)strlen(text));
+    ESP_LOGI(TAG, "%s turn: %u bytes", ask ? "ask" : "typed", (unsigned)strlen(text));
     send_chat(text, "text", false);
-    if (s_turn.phase == P_WAIT_REPLY) {
+    if (s_turn.phase == P_WAIT_REPLY && !ask) {
         mark(M_SENT);
         muse_hatch_console("sent", nullptr, "\"bytes\":%u", (unsigned)strlen(text));
     }
@@ -1454,6 +1488,13 @@ static void message_done(int i, const char *final_text)
         : m.len && s_turn.texts ? s_turn.texts + i * TEXT_MAX : nullptr;
     muse_review_store(s_turn.review, review);
 #endif
+    if (s_turn.ask) {
+        if (final_text && final_text[0] && strlen(final_text) != m.len && s_turn.texts) {
+            strlcpy(s_turn.texts + i * TEXT_MAX, final_text, TEXT_MAX);
+            m.len = strlen(final_text);
+        }
+        return;
+    }
     if (s_turn.text) {
         /* The whole text if the pieces didn't add up to it (a line skipped, say): the reader uses it instead. */
         size_t n = m.len;
@@ -1514,7 +1555,7 @@ static void on_event(cJSON *line)
         } else if (status) {
             s_turn.agent_busy = status[0] && strcmp(status, "completed") && strcmp(status, "failed");
         }
-        if (s_turn.text && s_turn.agent_busy != was) {
+        if (s_turn.text && !s_turn.ask && s_turn.agent_busy != was) {
             muse_hatch_console("busy", nullptr, "\"on\":%s", s_turn.agent_busy ? "true" : "false");
         }
         s_turn.last_event_us = now_us();
@@ -1541,9 +1582,15 @@ static void on_event(cJSON *line)
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
             append_text(m, text);
 #else
-            m.len += strlen(text);
+            if (s_turn.ask) {
+                append_text(m, text);
+            } else {
+                m.len += strlen(text);
+            }
 #endif
-            muse_hatch_console("text", text, "\"msg\":%d", i);
+            if (!s_turn.ask) {
+                muse_hatch_console("text", text, "\"msg\":%d", i);
+            }
         } else if (text && text[0]) {
             mark(M_TEXT);
             append_text(m, text);
@@ -2061,7 +2108,17 @@ static void handle(const cmd_t &cmd)
         if (s_turn.phase != P_IDLE && !s_turn.text) {
             muse_hatch_console("error", "BUSY WITH A VOICE TURN", nullptr);
         } else {
-            text_begin(cmd.text);
+            text_begin(cmd.text, false);
+        }
+        free(cmd.text);
+        break;
+    case CMD_ASK:
+        if (s_turn.phase != P_IDLE || call_busy()) {
+            cmd.done(nullptr, cmd.arg);
+        } else {
+            s_ask_done = cmd.done;
+            s_ask_arg = cmd.arg;
+            text_begin(cmd.text, true);
         }
         free(cmd.text);
         break;
@@ -2165,7 +2222,7 @@ static void hatch_task(void *arg)
 static void post(cmd_type_t type, uint32_t gen)
 {
     if (s_cmds) {
-        cmd_t cmd{ type, gen, nullptr };
+        cmd_t cmd{ type, gen, nullptr, nullptr, nullptr };
         xQueueSend(s_cmds, &cmd, pdMS_TO_TICKS(100));
     }
 }
@@ -2326,7 +2383,7 @@ extern "C" void muse_session_call_wake(void)
 
 extern "C" void muse_hatch_text_turn(char *text)
 {
-    cmd_t cmd{ CMD_TEXT, 0, text };
+    cmd_t cmd{ CMD_TEXT, 0, text, nullptr, nullptr };
     if (!s_cmds || !muse_hatch_configured()) {
         muse_hatch_console("error", "MUSE NOT SET UP", nullptr);
         free(text);
@@ -2334,6 +2391,16 @@ extern "C" void muse_hatch_text_turn(char *text)
         muse_hatch_console("error", "BUSY", nullptr);
         free(text);
     }
+}
+
+extern "C" bool muse_hatch_ask(const char *question, muse_hatch_ask_cb_t done, void *arg)
+{
+    cmd_t cmd{ CMD_ASK, 0, strdup(question), done, arg };
+    if (!s_cmds || !cmd.text || !muse_hatch_configured() || xQueueSend(s_cmds, &cmd, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        free(cmd.text);
+        return false;
+    }
+    return true;
 }
 
 extern "C" void muse_hatch_text_cancel(void)

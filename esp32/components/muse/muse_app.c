@@ -38,6 +38,9 @@
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
 #include "muse_review.h"
 #endif
+#if CONFIG_MUSE_WEATHER
+#include "muse_weather.h"
+#endif
 
 static const char *TAG = "muse";
 
@@ -108,6 +111,9 @@ void muse_app_run(const muse_board_t *board)
     }
 
     muse_hatch_start();
+#if CONFIG_MUSE_WEATHER
+    muse_weather_start();
+#endif
     /* Home Link owns the radios; these just hand it the saved settings. */
     muse_wifi_apply();
     muse_ble_apply();

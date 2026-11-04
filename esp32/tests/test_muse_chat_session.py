@@ -26,6 +26,7 @@ class ChatSession(unittest.TestCase):
         handlers = source[source.index('static int find_msg('):source.index('static void on_chat_ack(')]
         reset = source[source.index('static bool turn_start('):source.index('static void turn_begin(')]
         done = source[source.index('static void turn_done('):source.index('/* Ends any turn')]
+        ask = source[source.index('static muse_hatch_ask_cb_t s_ask_done;'):source.index('static void turn_finish(void)')]
         check = source[source.index('static void check_turn('):source.index('/* ---- Inbound dispatch')]
         chat = source[source.index('static void send_chat('):source.index('static void on_dictation_line(')]
         kinds = source.index('enum kind_t')
@@ -113,7 +114,7 @@ static int64_t open_stream(kind_t kind, const char *verb, const char *path, cons
 static bool send_body(int64_t, const uint8_t *, size_t, bool) { return true; }
 static void disconnect(const char *) {}
 static bool send_reset(int64_t) { return true; }
-''' + done + reset + handlers + start_tts + check + chat + r'''
+''' + ask + done + reset + handlers + start_tts + check + chat + r'''
 static void begin(bool typed = false) {
     clock_us = 12345;
     assert(turn_start(s_turn.gen + 1, typed));
@@ -328,6 +329,37 @@ static void typed_reply_at_cap(bool finished, bool busy) {
     assert(!strcmp(console_fields, finished && !busy ? "\"messages\":1,\"complete\":true"
                                                      : "\"messages\":1,\"complete\":false"));
 }
+static int ask_calls;
+static bool asked_null;
+static char asked[64];
+static void on_ask(const char *reply, void *arg) {
+    assert(arg == &ask_calls);
+    ask_calls++;
+    asked_null = !reply;
+    strlcpy(asked, reply ? reply : "", sizeof(asked));
+}
+static void ask_turn(bool final_only) {
+    s_turn.texts = s_texts;
+    begin(true);
+    s_turn.ask = true;
+    s_ask_done = on_ask;
+    s_ask_arg = &ask_calls;
+    ask_calls = 0;
+    if (final_only) {
+        event("message.assistant", "reply", "note", "Fremont|37.5485|-121.9886");
+    } else {
+        event("delta.message_start", "reply", "note");
+        event("delta.text_append", "reply", "", "San Jose|37.3382");
+        event("delta.text_append", "reply", "", "|-121.8863");
+        event("delta.message_done", "reply");
+    }
+    assert(!console_events && !captions && !ask_calls);
+    turn_done(true);
+    assert(ask_calls == 1 && !asked_null && !s_ask_done);
+    assert(!strcmp(asked, final_only ? "Fremont|37.5485|-121.9886" : "San Jose|37.3382|-121.8863"));
+    assert(!console_events && !done_events);
+    s_turn.texts = nullptr;
+}
 /* A dictated turn names the device, so Muse keeps its reply short and plain;
  * a typed one doesn't. Both still ask for text. */
 static void chat_request(bool spoken) {
@@ -336,7 +368,7 @@ static void chat_request(bool spoken) {
         assert(turn_start(s_turn.gen + 1, false));
         post_chat(" Hi");
     } else {
-        text_begin("Hi");
+        text_begin("Hi", false);
     }
     assert(s_turn.phase == P_WAIT_REPLY && s_turn.text == !spoken);
     assert(!strcmp(chat_body, spoken ? "{\"message\":\"Hi\",\"output_modality\":\"text\",\"device\":\"mcu-wearable\"}"
@@ -354,7 +386,7 @@ static const char *reviewed() {
 }
 /* Production typed turns: text_begin() starts each one with generation 0. */
 static void typed(const char *text) {
-    text_begin(text);
+    text_begin(text, false);
     assert(s_turn.phase == P_WAIT_REPLY && s_turn.text && s_turn.gen == 0);
     s_turn.acked = true;
     strlcpy(s_turn.user_ids[0], "note", sizeof(s_turn.user_ids[0]));
@@ -455,6 +487,8 @@ int main(int argc, char **argv) {
     case 17: typed_reply_at_cap(false, false); break;
     case 21: chat_request(true); break;
     case 22: chat_request(false); break;
+    case 23: ask_turn(false); break;
+    case 24: ask_turn(true); break;
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
     case 18: typed_turns_replace_the_review(); break;
     case 19: review_keeps_the_whole_reply(); break;
@@ -568,4 +602,10 @@ int main(int argc, char **argv) {
         for watcher in (False, True):
             for name, case in [('dictated', 21), ('typed', 22)]:
                 with self.subTest(turn=name, watcher=watcher):
+                    self.run_case(case, watcher=watcher)
+
+    def test_ask_turns_hand_the_reply_to_the_callback_and_not_the_console(self):
+        for watcher in (False, True):
+            for name, case in [('streamed', 23), ('final only', 24)]:
+                with self.subTest(reply=name, watcher=watcher):
                     self.run_case(case, watcher=watcher)

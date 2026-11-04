@@ -57,6 +57,15 @@ Muse's sessions need. These are off unless the build's `sdkconfig` (or
   comes from `CONFIG_MUSE_CLOCK_NTP_SERVER` (`pool.ntp.org`) once on Wi-Fi, in
   `CONFIG_MUSE_CLOCK_TZ` (a POSIX TZ string, UTC by default; for example
   `PST8PDT,M3.2.0,M11.1.0` for US Pacific time or `CST-8` for China).
+- `CONFIG_MUSE_WEATHER=y`: a line under the status line with the location and
+  weather, such as `San Jose 18°C Cloudy`. Twice a day the box asks Muse where
+  you are, as a typed message that shows in the Muse app's chat; a press of M
+  takes priority and the question waits for the next try. If Muse can't tell,
+  the location comes from the network's public IP (ipinfo.io), marked `(IP)`,
+  and failing that from `CONFIG_MUSE_WEATHER_FALLBACK` (`San Jose`), marked
+  `(default)`. The weather comes from Open-Meteo every 30 minutes, in °C
+  (`CONFIG_MUSE_WEATHER_FAHRENHEIT=y` for °F). City names with accented
+  letters show boxes: the line's font is Montserrat.
 
 ## Controls
 

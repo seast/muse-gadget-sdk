@@ -54,6 +54,12 @@
 #if CONFIG_MUSE_CLOCK
 #include "esp_netif_sntp.h"
 #endif
+#if CONFIG_MUSE_WEATHER
+#include "muse_weather.h"
+#define WEATHER_H 14
+#else
+#define WEATHER_H 0
+#endif
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
 #include "muse_review.h"
 #endif
@@ -74,7 +80,7 @@ static const char *TAG = "muse_ui";
 #define CAPTION_W 256           /* 16 columns of unscii_16, the width reply captions wrap to */
 #define CAPTION_LINE_SPACE 2
 #define LATIN_BAND_MARGIN 26    /* a small screen's accented captions clear its button icons */
-#define LONG_MUSE_TOP 44        /* long layout: Muse's top, under the state and name rows, while a reply shows */
+#define LONG_MUSE_TOP (44 + WEATHER_H)        /* long layout: Muse's top, under the state and name rows, while a reply shows */
 #define LONG_HINTS_H 135        /* long layout: the bottom strip, for the key hints, speaker and page dots */
 #define LONG_LINE_SPACE 4
 #define ART_BLANK_ROWS 3        /* Muse's art never reaches the grid's bottom rows */
@@ -174,6 +180,9 @@ static lv_obj_t *s_name_lbl;    /* this gadget's own name, to tell it from the n
 static lv_obj_t *s_power_lbl;
 #if CONFIG_MUSE_CLOCK
 static lv_obj_t *s_clock_lbl;   /* the time and IP address, first in the status line */
+#endif
+#if CONFIG_MUSE_WEATHER
+static lv_obj_t *s_weather_lbl;
 #endif
 static lv_obj_t *s_caption_lbl;
 static lv_obj_t *s_reply_lbl;   /* full layout: the reply's page while answering */
@@ -932,7 +941,7 @@ static void build_answer(lv_obj_t *face, int ring_in)
     }
 
     l = &s_answers[ANSWER_READ];
-    int status_bottom = (muse_board->rim_controls ? 40 : 20 + s_dy) + 16 - s_h / 2;
+    int status_bottom = (muse_board->rim_controls ? 40 : 20 + s_dy) + 16 + WEATHER_H - s_h / 2;
     l->px = MUSE_PX_W * MINI_CELL_PX;
     l->y = status_bottom + 2 + l->px / 2;   /* its sparkles clear of the status line */
     l->align = LV_TEXT_ALIGN_LEFT;
@@ -1244,19 +1253,25 @@ static void build_screen(void)
     lv_obj_set_flex_flow(status, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(status, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(status, s_small ? 4 : 8, 0);
-    lv_obj_align(status, LV_ALIGN_TOP_MID, 0, muse_board->rim_controls ? 40 : s_small ? 1 : 20 + s_dy);
+    int status_y = muse_board->rim_controls ? 40 : s_small ? 1 : 20 + s_dy;
+    lv_obj_align(status, LV_ALIGN_TOP_MID, 0, status_y);
 #if CONFIG_MUSE_CLOCK
     s_clock_lbl = make_label(status, &lv_font_unscii_8, COLOR_DIM);
 #endif
     s_wifi_icon = make_label(status, &lv_font_montserrat_14, COLOR_DIM);
     s_ble_icon = make_label(status, &lv_font_montserrat_14, COLOR_DIM);
     s_power_lbl = make_label(status, &lv_font_unscii_8, COLOR_DIM);
+#if CONFIG_MUSE_WEATHER
+    s_weather_lbl = make_label(face, FONT_COMPACT, COLOR_DIM);
+    lv_obj_align(s_weather_lbl, LV_ALIGN_TOP_MID, 0, status_y + 16);
+    lv_obj_set_flag(s_weather_lbl, LV_OBJ_FLAG_HIDDEN, s_small && !s_tall && s_h < 200);
+#endif
 
     /* The compact layout leaves the state to the avatar and the caption,
      * unless the screen is tall enough to fit it in small type above Muse. */
     s_state_lbl = make_label(face, s_small ? &lv_font_unscii_8 : &lv_font_unscii_16, 0xffffff);
     lv_obj_set_style_text_letter_space(s_state_lbl, s_small ? 1 : 2, 0);
-    lv_obj_align(s_state_lbl, LV_ALIGN_TOP_MID, 0, muse_board->rim_controls ? 64 : s_small ? 22 : 40 + s_dy);
+    lv_obj_align(s_state_lbl, LV_ALIGN_TOP_MID, 0, (muse_board->rim_controls ? 64 : s_small ? 22 : 40 + s_dy) + WEATHER_H);
     lv_obj_set_flag(s_state_lbl, LV_OBJ_FLAG_HIDDEN, s_small && !s_tall && s_h < 200);
 
     /* This gadget's own name, dim under the state while it's unpaired: with
@@ -1267,7 +1282,8 @@ static void build_screen(void)
     /* Under the state, which a small screen draws in unscii-8 or, with accented
      * letters, the caption font's 16 px (update_status). */
     int state_h = lv_font_get_line_height(muse_lang_label_font(muse_lang_status("READY"), &lv_font_unscii_8));
-    lv_obj_align(s_name_lbl, LV_ALIGN_TOP_MID, 0, muse_board->rim_controls ? 88 : s_small ? 24 + state_h : 60 + s_dy);
+    lv_obj_align(s_name_lbl, LV_ALIGN_TOP_MID, 0,
+                 (muse_board->rim_controls ? 88 : s_small ? 24 + state_h : 60 + s_dy) + WEATHER_H);
     if (muse_board->rim_controls) {
         /* Safe chord below the round panel's top, not the full 466 px width. */
         lv_obj_set_size(s_state_lbl, 280, lv_font_get_line_height(&lv_font_unscii_16));
@@ -1861,6 +1877,13 @@ static void update_power(float now)
 #if CONFIG_MUSE_CLOCK
     update_clock();
 #endif
+#if CONFIG_MUSE_WEATHER
+    char weather[96];
+    muse_weather_line(weather, sizeof(weather));
+    if (strcmp(weather, lv_label_get_text(s_weather_lbl)) != 0) {
+        lv_label_set_text(s_weather_lbl, weather);
+    }
+#endif
 
     muse_power_t p = muse_state_power();
     char buf[32];
@@ -2293,6 +2316,9 @@ static void turn_screen(const muse_board_t *board)
     s_ptt_hint = s_spk_hint = s_pwr_hint = s_speaker = s_speaker_icon = NULL;
 #if CONFIG_MUSE_CLOCK
     s_clock_lbl = NULL;
+#endif
+#if CONFIG_MUSE_WEATHER
+    s_weather_lbl = NULL;
 #endif
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
     s_review_position = NULL;

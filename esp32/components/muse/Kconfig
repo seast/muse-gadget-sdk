@@ -471,6 +471,30 @@ menu "Muse"
         depends on MUSE_CLOCK
         default "pool.ntp.org"
 
+    config MUSE_WEATHER
+        bool "Show the location and weather under the status line"
+        depends on MUSE_ENABLED && MUSE_HATCH && !MUSE_UI_FREEINK
+        default n
+        help
+            A line under the status line with where the gadget is and the
+            weather there, such as "San Jose 18°C Cloudy". The location comes
+            from Muse: twice a day the gadget asks it, as a message in the
+            chat you can see in the Muse app, where you are. If Muse can't
+            tell, the location comes from the network's public IP address
+            (ipinfo.io), marked (IP), and failing that it's the fallback city
+            below, marked (default). The weather comes from Open-Meteo every
+            30 minutes.
+
+    config MUSE_WEATHER_FAHRENHEIT
+        bool "Temperatures in Fahrenheit"
+        depends on MUSE_WEATHER
+        default n
+
+    config MUSE_WEATHER_FALLBACK
+        string "Fallback location (name|latitude|longitude)"
+        depends on MUSE_WEATHER
+        default "San Jose|37.3382|-121.8863"
+
     config MUSE_TAP_MS
         int "Longest talk-button press that's a tap (ms)"
         depends on MUSE_ENABLED
