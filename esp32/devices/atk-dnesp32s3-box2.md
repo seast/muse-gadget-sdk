@@ -42,16 +42,27 @@ python -m esptool --chip esp32s3 -p PORT read-flash 0 0x1000000 atk-box2-factory
 
 The overlay keeps the avatar's and audio's static buffers (about 18 KB) in
 PSRAM (`CONFIG_MUSE_STATIC_BUFFERS_IN_PSRAM`), for the internal RAM Link and
-Muse's sessions need. Live voice calls (`CONFIG_MUSE_REALTIME_VOICE=y`, see
-"Live voice calls" in [`../AGENTS.md`](../AGENTS.md)) are off unless the
-build's `sdkconfig` (or `idf.py -B build-muse-atk-dnesp32s3-box2 menuconfig`)
-turns them on.
+Muse's sessions need. These are off unless the build's `sdkconfig` (or
+`idf.py -B build-muse-atk-dnesp32s3-box2 menuconfig`) turns them on:
+
+- `CONFIG_MUSE_REALTIME_VOICE=y`: live voice calls (see "Live voice calls" in
+  [`../AGENTS.md`](../AGENTS.md)).
+- `CONFIG_MUSE_TAP_MS`: the longest press of M that's a tap, 300 ms by default.
+  With live calls, 2000 makes any press under 2 s start or end a call.
+- `CONFIG_MUSE_HIDE_REPLY_CAPTIONS=y`: only Muse's animation while it thinks
+  and answers, with no transcript or reply text. A voice note's reply is text
+  only (Muse doesn't speak it), so with this on it's read in the Muse app;
+  live calls are heard.
+- `CONFIG_MUSE_CLOCK=y`: the time and IP address in the status line. The time
+  comes from `CONFIG_MUSE_CLOCK_NTP_SERVER` (`pool.ntp.org`) once on Wi-Fi, in
+  `CONFIG_MUSE_CLOCK_TZ` (a POSIX TZ string, UTC by default; for example
+  `PST8PDT,M3.2.0,M11.1.0` for US Pacific time or `CST-8` for China).
 
 ## Controls
 
-- M (XL9555 P0.7, active high): talk. A tap (under 300 ms) starts or ends a
-  live call, or only wakes the screen; held longer it records a voice note
-  from the start of the press. Also pairing confirmation, and
+- M (XL9555 P0.7, active high): talk. A tap (under `CONFIG_MUSE_TAP_MS`)
+  starts or ends a live call, or only wakes the screen; held longer it records
+  a voice note from the start of the press. Also pairing confirmation, and
   select in the menu.
 - R (BOOT, GPIO0): opens the menu and steps down it. Held at reset it enters
   the ROM bootloader, as on any S3.

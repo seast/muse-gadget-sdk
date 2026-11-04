@@ -48,7 +48,10 @@ static const char *TAG = "muse_voice";
 #define MAX_SECS 15
 #define TAIL_FRAMES (MUSE_AUDIO_RATE * 12 / 100)   /* capture lag + poll interval, stops before the release click */
 #define MAX_FRAMES (MUSE_AUDIO_RATE * MAX_SECS)
-#define MIN_HELD_FRAMES (MUSE_AUDIO_RATE * 3 / 10)   /* shorter presses are taps, not speech */
+#ifndef CONFIG_MUSE_TAP_MS
+#define CONFIG_MUSE_TAP_MS 300
+#endif
+#define MIN_HELD_FRAMES (MUSE_AUDIO_RATE * CONFIG_MUSE_TAP_MS / 1000)   /* shorter presses are taps, not speech */
 #if CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV || CONFIG_MUSE_BOARD_AI_PASSPORT
 #define PRE_CHUNKS 6                                   /* 120 ms; a 320 ms upload burst stalls on the ADV and C3 */
 #else

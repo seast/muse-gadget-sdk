@@ -438,6 +438,49 @@ menu "Muse"
             them. Needs PSRAM. Without it, voice notes go over Home Link's own
             session to its paired VM and replies are shown as text.
 
+    config MUSE_HIDE_REPLY_CAPTIONS
+        bool "Only Muse's animation while it answers, no reply text"
+        depends on MUSE_ENABLED && !MUSE_UI_FREEINK
+        default n
+        help
+            While Muse thinks and answers, the screen shows only its
+            animation: no transcript and no reply text. Captions between
+            turns, such as errors and hints, still show. Meant for live
+            voice calls, whose replies are heard. A voice note's reply is
+            text only (Muse doesn't speak it), so with this on it's read in
+            the Muse app.
+
+    config MUSE_CLOCK
+        bool "Show the time and IP address in the status line"
+        depends on MUSE_ENABLED && !MUSE_UI_FREEINK
+        default n
+        help
+            The status line shows the time, once it's set from a time server
+            over Wi-Fi, and the IP address while on Wi-Fi.
+
+    config MUSE_CLOCK_TZ
+        string "Time zone (POSIX TZ string)"
+        depends on MUSE_CLOCK
+        default "UTC0"
+        help
+            For example "PST8PDT,M3.2.0,M11.1.0" for US Pacific time or
+            "CST-8" for China.
+
+    config MUSE_CLOCK_NTP_SERVER
+        string "Time server"
+        depends on MUSE_CLOCK
+        default "pool.ntp.org"
+
+    config MUSE_TAP_MS
+        int "Longest talk-button press that's a tap (ms)"
+        depends on MUSE_ENABLED
+        range 100 3000
+        default 300
+        help
+            A press of the talk button released sooner than this is a tap: it
+            only wakes Muse, or with live voice calls starts or ends a call.
+            Held longer, it's a voice note from the start of the press.
+
     config MUSE_REALTIME_VOICE
         bool "Live voice calls with Muse (experimental)"
         depends on (MUSE_HATCH || HOMEHUB_VOICE) && SPIRAM

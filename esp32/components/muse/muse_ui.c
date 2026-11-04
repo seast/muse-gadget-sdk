@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -50,6 +51,9 @@
 #if CONFIG_MUSE_VIDEO
 #include "muse_video.h"
 #endif
+#if CONFIG_MUSE_CLOCK
+#include "esp_netif_sntp.h"
+#endif
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
 #include "muse_review.h"
 #endif
@@ -58,6 +62,10 @@
 #endif
 
 static const char *TAG = "muse_ui";
+
+#ifndef CONFIG_MUSE_HIDE_REPLY_CAPTIONS
+#define CONFIG_MUSE_HIDE_REPLY_CAPTIONS 0
+#endif
 
 #define METER_SEGS 14
 #define METER_SEG_PX 9
@@ -164,6 +172,9 @@ static bool s_caption_shown;
 static lv_obj_t *s_state_lbl;
 static lv_obj_t *s_name_lbl;    /* this gadget's own name, to tell it from the next one */
 static lv_obj_t *s_power_lbl;
+#if CONFIG_MUSE_CLOCK
+static lv_obj_t *s_clock_lbl;   /* the time and IP address, first in the status line */
+#endif
 static lv_obj_t *s_caption_lbl;
 static lv_obj_t *s_reply_lbl;   /* full layout: the reply's page while answering */
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
@@ -1221,6 +1232,9 @@ static void build_screen(void)
     lv_obj_set_flex_align(status, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(status, s_small ? 4 : 8, 0);
     lv_obj_align(status, LV_ALIGN_TOP_MID, 0, muse_board->rim_controls ? 40 : s_small ? 1 : 20 + s_dy);
+#if CONFIG_MUSE_CLOCK
+    s_clock_lbl = make_label(status, &lv_font_unscii_8, COLOR_DIM);
+#endif
     s_wifi_icon = make_label(status, &lv_font_montserrat_14, COLOR_DIM);
     s_ble_icon = make_label(status, &lv_font_montserrat_14, COLOR_DIM);
     s_power_lbl = make_label(status, &lv_font_unscii_8, COLOR_DIM);
@@ -1792,12 +1806,46 @@ static void set_meter_visible(bool visible)
     s_shown_lit = -1;
 }
 
+#if CONFIG_MUSE_CLOCK
+/* The time, once a time server has set it, and the IP address on Wi-Fi. The
+ * time server is asked once Wi-Fi first connects; SNTP keeps it set. */
+static void update_clock(void)
+{
+    static bool asked;
+    muse_wifi_status_t w;
+    muse_wifi_status(&w);
+    bool online = w.state == MUSE_WIFI_CONNECTED;
+    if (online && !asked) {
+        setenv("TZ", CONFIG_MUSE_CLOCK_TZ, 1);
+        tzset();
+        esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG(CONFIG_MUSE_CLOCK_NTP_SERVER);
+        asked = esp_netif_sntp_init(&cfg) == ESP_OK;
+    }
+    char buf[32] = "";
+    int n = 0;
+    time_t t = time(NULL);
+    struct tm tm;
+    if (localtime_r(&t, &tm) && tm.tm_year >= 2024 - 1900) {   /* unset, the clock starts at 1970 */
+        n = (int)strftime(buf, sizeof(buf), "%H:%M", &tm);
+    }
+    if (online && w.ip[0]) {
+        snprintf(buf + n, sizeof(buf) - n, "%s%s", n ? " " : "", w.ip);
+    }
+    if (strcmp(buf, lv_label_get_text(s_clock_lbl)) != 0) {
+        lv_label_set_text(s_clock_lbl, buf);
+    }
+}
+#endif
+
 static void update_power(float now)
 {
     if (now < s_next_power_update) {
         return;
     }
     s_next_power_update = now + 1.0f;
+#if CONFIG_MUSE_CLOCK
+    update_clock();
+#endif
 
     muse_power_t p = muse_state_power();
     char buf[32];
@@ -1972,7 +2020,7 @@ static void update_status(muse_mode_t mode, float now)
             view.stale = true;   /* a page wrapped for the old layout is wrapped again */
 #endif
         }
-        if (mode == MUSE_MODE_THINKING || mode == MUSE_MODE_SPEAKING) {
+        if (!CONFIG_MUSE_HIDE_REPLY_CAPTIONS && (mode == MUSE_MODE_THINKING || mode == MUSE_MODE_SPEAKING)) {
             answer = layout;
         }
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
@@ -2027,6 +2075,14 @@ static void update_status(muse_mode_t mode, float now)
         s_caption_shown = shown[0] != '\0';
 #endif
     }
+#if CONFIG_MUSE_HIDE_REPLY_CAPTIONS
+    /* Only Muse while it thinks and answers: the transcript and reply stay
+     * off the screen. Captions between turns (errors, hints) still show. */
+    bool hide = mode == MUSE_MODE_THINKING || mode == MUSE_MODE_SPEAKING || !lv_label_get_text(s_caption_lbl)[0];
+    if (hide != lv_obj_has_flag(s_caption_lbl, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_set_flag(s_caption_lbl, LV_OBJ_FLAG_HIDDEN, hide);
+    }
+#endif
 #if CONFIG_MUSE_SMALL_FULL_REPLY
     if (s_small && !s_long) {
         apply_text_size();
