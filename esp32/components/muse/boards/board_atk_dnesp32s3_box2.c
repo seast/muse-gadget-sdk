@@ -64,9 +64,10 @@ static const char *TAG = "board";
 #define LCD_RD GPIO_NUM_10
 #define LCD_WR GPIO_NUM_11
 #define LCD_BL GPIO_NUM_21
-/* Two internal-RAM strips of 320 x 8 (10 KB): with 32 lines, Link and Muse's
- * sessions ran out of internal RAM and Muse couldn't connect. */
-#define DRAW_BUF_LINES 8
+/* Two strips of 320 x 40 (50 KB) in PSRAM, which the i80 bus sends by DMA:
+ * in internal RAM even 32 lines left Link and Muse's sessions too little,
+ * and Muse couldn't connect. */
+#define DRAW_BUF_LINES 40
 
 #define I2C_SDA GPIO_NUM_48
 #define I2C_SCL GPIO_NUM_47
@@ -241,6 +242,15 @@ static bool read_flip(bool *flip)
     return true;
 }
 
+static void round_area(lv_event_t *e)
+{
+    lv_area_t *a = lv_event_get_param(e);
+    a->x1 &= ~15;
+    a->x2 |= 15;
+    a->y1 &= ~1;
+    a->y2 |= 1;
+}
+
 /* Landscape, turned as the V1.1 box turns the same panel; turned over, both
  * mirrors change. */
 static void set_flip(bool flipped)
@@ -371,13 +381,17 @@ static lv_display_t *display_start(lv_indev_t **touch)
             .hor_res = LCD_H_RES,
             .ver_res = LCD_V_RES,
             .buffer_height = DRAW_BUF_LINES,
-            .use_psram = false,
+            .use_psram = true,
             .require_double_buffer = true,
         },
         .tear_avoid_mode = ESP_LV_ADAPTER_TEAR_AVOID_MODE_NONE,
     };
     lv_display_t *disp = esp_lv_adapter_register_display(&disp_cfg);
-    if (!disp || esp_lv_adapter_start() != ESP_OK) {
+    if (!disp) {
+        return NULL;
+    }
+    lv_display_add_event_cb(disp, round_area, LV_EVENT_INVALIDATE_AREA, NULL);
+    if (esp_lv_adapter_start() != ESP_OK) {
         return NULL;
     }
     return disp;
