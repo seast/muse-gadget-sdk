@@ -221,7 +221,7 @@ status screen.
 | OSTB EchoEar-2ST (experimental) | UI, touch microphone and pairing confirmation, local audio | [EchoEar setup](devices/ostb-echoear-2st.md) |
 | Espressif ESP32-S3-BOX-3 | UI, touch, push-to-talk, settings, images | [BOX-3 setup](devices/esp32-s3-box-3.md) |
 | ALIENTEK ATK-DNESP32S3-BOX V1.1 | UI, push-to-talk, two-key menu, images | `tools/muse/board.sh build atk-box`, see [setup](devices/atk-dnesp32s3-box.md) |
-| ALIENTEK ATK-DNESP32S3-BOX2 (experimental) | UI, push-to-talk, menu, speaker and power keys, turns with the box, portrait unverified (battery unverified) | `tools/muse/board.sh build atk-box2`, see [setup](devices/atk-dnesp32s3-box2.md) |
+| ALIENTEK ATK-DNESP32S3-BOX2 (experimental) | UI, push-to-talk, menu, speaker and power keys, turns with the box (battery unverified) | `tools/muse/board.sh build atk-box2`, see [setup](devices/atk-dnesp32s3-box2.md) |
 | AIPI Lite | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-C6-Touch-AMOLED-1.8 | UI, push-to-talk with text replies | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.8 | UI, touch, push-to-talk, settings, images (unverified) | `tools/muse/board.sh build s3-18` |

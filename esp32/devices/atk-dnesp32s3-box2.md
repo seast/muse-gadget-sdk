@@ -103,10 +103,9 @@ Muse's sessions need. These are off unless the build's `sdkconfig` (or
   stays open, and a downloaded image goes.
 - The key icons sit along the keys' edge, M in the middle and R at its end,
   and move with it: along the bottom turned over, down a side in portrait.
-- Checked on a unit: upright and turned over. Not yet: portrait, which takes
-  the panel's own address order or both mirrors (`WAYS` in the board file)
-  for the two sides. If the portrait picture comes up upside down, those two
-  rows are the wrong way round.
+- Checked on a unit: all four ways up. Portrait takes the panel's own
+  address order on one side and both mirrors on the other (`WAYS` in the
+  board file).
 - Captions show Chinese, Japanese and Korean (`CONFIG_MUSE_CJK_FONT`).
 - LVGL draws through two 40-line strips in PSRAM (`DRAW_BUF_LINES`, 50 KB),
   which the i80 bus sends by DMA. In internal RAM even 32 lines left Link and
@@ -140,20 +139,19 @@ Checked on one unit, powered over USB:
 - The speaker plays the built-in MP3 (console key `m`) and the
   `>test.loopback` tones; the mic records voice notes that reach Muse.
 - Keys M, R, L and Q as above.
-- The picture turns over with the box, and the key icons sit along the top
-  edge by keys M and R.
+- The picture turns with the box, all four ways up, and the key icons sit
+  along the keys' edge each way.
 
 Still to check:
 
-1. The picture in portrait on both sides (see Screen).
-2. The 40-line strips in PSRAM: the picture whole, with no `Draw bitmap
+1. The 40-line strips in PSRAM: the picture whole, with no `Draw bitmap
    failed` in the log, and internal RAM through a live call and a voice note
    (`min=` in the heartbeat should stay above about 8K).
-3. A boot on battery: the board stays on after the power key is released.
-4. Playback after the audio has rested on battery (asleep, unplugged) and
+2. A boot on battery: the board stays on after the power key is released.
+3. Playback after the audio has rested on battery (asleep, unplugged) and
    reopened: xiaozhi keeps the ES8389's output open for fear that reopening
    the duplex bus leaves it silent on IDF 6. On USB the audio never rests.
-5. The menu: volume changes and is kept across a restart.
-6. Battery: the percentage and the charging state.
-7. Power off on battery, and which key turns it back on; on USB, deep sleep
+4. The menu: volume changes and is kept across a restart.
+5. Battery: the percentage and the charging state.
+6. Power off on battery, and which key turns it back on; on USB, deep sleep
    and waking on R, M and Q.
