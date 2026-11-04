@@ -25,6 +25,8 @@
 
 #include "muse_clock_art.h"
 #include "muse_lang.h"
+#include "muse_state.h"
+#include "muse_wifi.h"
 #if CONFIG_MUSE_WEATHER
 #include "muse_weather.h"
 #endif
@@ -51,12 +53,19 @@
 #define COLOR_SECONDS 0x4cc46a
 #define COLOR_TAG 0x9fd8ff
 #define COLOR_ON_TAG 0x14202c
+#define COLOR_OFF 0x3a3f4b
+#define COLOR_LOW 0xe64c4c
+#define BATTERY_W 22
+#define BATTERY_INNER (BATTERY_W - 2 - 4)
 
 static lv_obj_t *s_root, *s_slot;
 static lv_obj_t *s_week, *s_date, *s_city, *s_icon;
 static lv_obj_t *s_hh, *s_mm, *s_ss, *s_tag;
 static lv_obj_t *s_temp, *s_range, *s_humidity;
+static lv_obj_t *s_bars[4], *s_battery, *s_battery_fill, *s_pct;
 static time_t s_shown_t;
+static int s_shown_lit, s_shown_fill;
+static uint32_t s_shown_battery_color;
 
 static lv_obj_t *card(lv_obj_t *parent, int x, int y, int w, int h, uint32_t bg)
 {
@@ -102,6 +111,45 @@ static lv_obj_t *tag(lv_obj_t *parent, const lv_font_t *font, uint32_t bg, const
     lv_obj_set_style_pad_hor(l, 4, 0);
     lv_obj_set_style_pad_ver(l, 1, 0);
     return l;
+}
+
+static lv_obj_t *rect(lv_obj_t *parent, int w, int h, uint32_t color)
+{
+    lv_obj_t *r = lv_obj_create(parent);
+    lv_obj_remove_style_all(r);
+    lv_obj_set_size(r, w, h);
+    lv_obj_set_style_bg_color(r, lv_color_hex(color), 0);
+    lv_obj_set_style_bg_opa(r, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(r, 1, 0);
+    lv_obj_remove_flag(r, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    return r;
+}
+
+static void build_status(lv_obj_t *parent)
+{
+    lv_obj_t *row = box(parent, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(row, 6, 0);
+    lv_obj_t *bars = box(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(bars, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+    lv_obj_set_style_pad_column(bars, 2, 0);
+    for (int i = 0; i < 4; i++) {
+        s_bars[i] = rect(bars, 3, 4 + 3 * i, COLOR_OFF);
+    }
+    s_battery = box(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(s_battery, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_t *body = rect(s_battery, BATTERY_W, 12, 0);
+    lv_obj_set_style_bg_opa(body, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_color(body, lv_color_hex(COLOR_TEXT), 0);
+    lv_obj_set_style_border_width(body, 1, 0);
+    lv_obj_set_style_radius(body, 2, 0);
+    lv_obj_set_style_pad_all(body, 2, 0);
+    s_battery_fill = rect(body, 0, lv_pct(100), COLOR_TEXT);
+    rect(s_battery, 2, 5, COLOR_TEXT);
+    lv_obj_add_flag(s_battery, LV_OBJ_FLAG_HIDDEN);
+    s_pct = text(row, &lv_font_montserrat_14, COLOR_TEXT, "");
+    s_shown_lit = s_shown_fill = -1;
+    s_shown_battery_color = 0;
 }
 
 static lv_obj_t *reading(lv_obj_t *parent, const lv_image_dsc_t *badge, const lv_font_t *font)
@@ -168,11 +216,19 @@ void muse_clock_view_build(lv_obj_t *parent, int w, int h)
     lv_obj_t *low = card(s_root, m, low_y, left_w, low_h, COLOR_CARD);
     lv_obj_set_flex_flow(low, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(low, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_left(low, pad, 0);
+    lv_obj_set_style_pad_hor(low, pad, 0);
     s_temp = reading(low, &muse_clock_badge_temp, &lv_font_montserrat_20);
     s_range = text(lv_obj_get_parent(s_temp), &lv_font_montserrat_14, COLOR_DIM, "");
     lv_obj_set_flag(s_range, LV_OBJ_FLAG_HIDDEN, tall);
     s_humidity = reading(low, &muse_clock_badge_humidity, &lv_font_montserrat_20);
+    if (tall) {
+        build_status(low);
+    } else {
+        lv_obj_t *row = lv_obj_get_parent(s_humidity);
+        lv_obj_set_width(row, lv_pct(100));
+        lv_obj_set_flex_grow(s_humidity, 1);
+        build_status(row);
+    }
 
     s_slot = card(s_root, w - m - muse_w, low_y, muse_w, low_h, 0x000000);
     s_shown_t = 0;
@@ -184,6 +240,8 @@ void muse_clock_view_forget(void)
     s_week = s_date = s_city = s_icon = NULL;
     s_hh = s_mm = s_ss = s_tag = NULL;
     s_temp = s_range = s_humidity = NULL;
+    s_battery = s_battery_fill = s_pct = NULL;
+    memset(s_bars, 0, sizeof(s_bars));
 }
 
 lv_obj_t *muse_clock_view_root(void)
@@ -201,6 +259,45 @@ static void set_text(lv_obj_t *l, const char *s)
     if (strcmp(lv_label_get_text(l), s) != 0) {
         lv_label_set_text(l, s);
     }
+}
+
+static void update_status(void)
+{
+    muse_wifi_status_t w;
+    muse_wifi_status(&w);
+    int lit = w.state != MUSE_WIFI_CONNECTED ? 0
+              : w.rssi >= -55                ? 4
+              : w.rssi >= -65                ? 3
+              : w.rssi >= -75                ? 2
+                                             : 1;
+    if (lit != s_shown_lit) {
+        s_shown_lit = lit;
+        for (int i = 0; i < 4; i++) {
+            lv_obj_set_style_bg_color(s_bars[i], lv_color_hex(i < lit ? COLOR_TEXT : COLOR_OFF), 0);
+        }
+    }
+
+    muse_power_t p = muse_state_power();
+    char buf[24];
+    if (p.battery_pct < 0) {
+        lv_obj_add_flag(s_battery, LV_OBJ_FLAG_HIDDEN);
+        set_text(s_pct, p.usb ? "USB" : "");
+        return;
+    }
+    lv_obj_remove_flag(s_battery, LV_OBJ_FLAG_HIDDEN);
+    int fill = p.battery_pct > 0 ? LV_MAX(1, BATTERY_INNER * p.battery_pct / 100) : 0;
+    if (fill != s_shown_fill) {
+        s_shown_fill = fill;
+        lv_obj_set_width(s_battery_fill, fill);
+    }
+    uint32_t color = p.charging ? COLOR_SECONDS : p.battery_pct <= 15 ? COLOR_LOW : COLOR_TEXT;
+    if (color != s_shown_battery_color) {
+        s_shown_battery_color = color;
+        lv_obj_set_style_bg_color(s_battery_fill, lv_color_hex(color), 0);
+        lv_obj_set_style_text_color(s_pct, lv_color_hex(color), 0);
+    }
+    snprintf(buf, sizeof(buf), "%s%d%%", p.charging ? LV_SYMBOL_CHARGE " " : "", p.battery_pct);
+    set_text(s_pct, buf);
 }
 
 #if CONFIG_MUSE_WEATHER
@@ -283,6 +380,7 @@ void muse_clock_view_update(void)
         strftime(buf, sizeof(buf), "%Y/%m/%d", &tm);
         set_text(s_date, buf);
     }
+    update_status();
 #if CONFIG_MUSE_WEATHER
     update_weather();
 #endif

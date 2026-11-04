@@ -72,6 +72,9 @@ Muse's sessions need. These are off unless the build's `sdkconfig` (or
   shows the weekday, date and time with seconds, and with `CONFIG_MUSE_WEATHER`
   the place, an icon and word for the sky, the temperature, today's high and
   low (landscape only) and the humidity, with Muse at 64 px in the corner.
+  Beside the humidity (under it in portrait) are Wi-Fi bars for the signal
+  and the battery's level, green while charging and red at 15% or less, or
+  `USB` with no battery reading.
   The clock doesn't sleep. M, the menu and an image from Muse take the screen
   while they need it, and the clock comes back 3 s after Muse is idle.
   Checked on a unit in landscape and portrait.
