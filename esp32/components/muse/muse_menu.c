@@ -644,7 +644,9 @@ void muse_menu_build(lv_obj_t *parent, int w, int h)
     bool aux_side = aux->align == LV_ALIGN_RIGHT_MID && !muse_board->flat_menu_hints;
     int strip = aux_side ? lv_font_get_line_height(font) + 2 : 0;
 
-    s_keys = xQueueCreate(8, sizeof(uint8_t));
+    if (!s_keys) {
+        s_keys = xQueueCreate(8, sizeof(uint8_t));
+    }
 
     s_root = lv_obj_create(parent);
     lv_obj_remove_style_all(s_root);
@@ -723,6 +725,11 @@ void muse_menu_build(lv_obj_t *parent, int w, int h)
     }
     s_hint_select = label(s_root, font, COLOR_TEXT, "");
     align_on_bar(s_hint_select, select, pad);
+
+    if (s_view != VIEW_CLOSED) {
+        lv_obj_remove_flag(s_root, LV_OBJ_FLAG_HIDDEN);
+        show(s_view);
+    }
 }
 
 bool muse_menu_tick(float now)

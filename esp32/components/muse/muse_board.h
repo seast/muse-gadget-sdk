@@ -76,7 +76,7 @@ typedef struct {
     int16_t x, y;
 } muse_button_hint_t;
 
-typedef struct {
+typedef struct muse_board_s {
     const char *name;
     int width, height;
     bool round;             /* circular panel: keep content inside the circle */
@@ -113,6 +113,7 @@ typedef struct {
     lv_display_t *(*display_start)(lv_indev_t **touch);
     bool (*display_lock)(int timeout_ms);   /* -1 waits forever */
     void (*display_unlock)(void);
+    const struct muse_board_s *(*turned)(void);
     void (*set_brightness)(int pct);        /* 0 = off */
     void (*panel_sleep)(bool sleep);        /* screen off; NULL: backlight only */
     /* Screen off with nothing to draw: stops LVGL's task and tick, and touch,
@@ -172,7 +173,7 @@ typedef struct {
     esp_err_t (*power_off)(void);
 } muse_board_t;
 
-/* The running board, set by muse_app_run(). */
+/* The running board, set by muse_app_run() and by a board that turns. */
 extern const muse_board_t *muse_board;
 
 /* Starts everything and returns; Home Link's app_main() calls it. */

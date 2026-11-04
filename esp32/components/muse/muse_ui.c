@@ -335,6 +335,7 @@ static void muse_dec_close(lv_image_decoder_t *dec, lv_image_decoder_dsc_t *dsc)
 
 static void muse_image_init(void)
 {
+    static int strip_px;
     s_muse_src.header.magic = LV_IMAGE_HEADER_MAGIC;
     s_muse_src.header.cf = LV_COLOR_FORMAT_RGB565;
     s_muse_src.header.w = s_canvas_px;
@@ -342,11 +343,23 @@ static void muse_image_init(void)
     s_muse_src.header.stride = s_canvas_px * sizeof(uint16_t);
     s_muse_src.data = (const uint8_t *)&s_muse_src;   /* LVGL skips sources without data */
     muse_pixel_set_size(s_canvas_px);
+    s_cells_valid = false;
 
-    for (int i = 0; i < STRIPS; i++) {
-        s_strips[i] = lv_draw_buf_create(s_canvas_px, STRIP_ROWS, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
-        assert(s_strips[i]);
+    if (strip_px != s_canvas_px) {
+        for (int i = 0; i < STRIPS; i++) {
+            if (s_strips[i]) {
+                lv_draw_buf_destroy(s_strips[i]);
+            }
+            s_strips[i] = lv_draw_buf_create(s_canvas_px, STRIP_ROWS, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
+            assert(s_strips[i]);
+        }
+        strip_px = s_canvas_px;
     }
+    static bool once;
+    if (once) {
+        return;
+    }
+    once = true;
     lv_image_decoder_t *dec = lv_image_decoder_create();
     assert(dec);
     lv_image_decoder_set_info_cb(dec, muse_dec_info);
@@ -1593,8 +1606,10 @@ static void build_overlays(void)
     lv_obj_add_event_cb(s_cover, on_cover_event, LV_EVENT_RELEASED, NULL);
     lv_obj_add_event_cb(s_cover, on_cover_event, LV_EVENT_PRESS_LOST, NULL);
 
-    if (s_indev) {
+    static bool pressing;
+    if (s_indev && !pressing) {
         lv_indev_add_event_cb(s_indev, on_any_press, LV_EVENT_PRESSED, NULL);
+        pressing = true;
     }
 }
 
@@ -2144,8 +2159,16 @@ void muse_ui_request_snapshot(void)
     s_snapshot = true;
 }
 
+static void turn_screen(const muse_board_t *board);
+
 static void frame_tick(lv_timer_t *timer)
 {
+    if (muse_board->turned) {
+        const muse_board_t *board = muse_board->turned();
+        if (board) {
+            turn_screen(board);
+        }
+    }
 #if LV_USE_SNAPSHOT
     if (s_bench_page >= 0) {
         bool settings = s_bench_page != 0;
@@ -2219,7 +2242,7 @@ static void frame_tick(lv_timer_t *timer)
     update_status(mode, now);
 }
 
-esp_err_t muse_ui_start(void)
+static void set_layout(void)
 {
     s_w = muse_board->width;
     s_h = muse_board->height;
@@ -2251,7 +2274,62 @@ esp_err_t muse_ui_start(void)
         s_canvas_px = (MUSE_PX_W * 5 + 2 * s_dy) / MUSE_PX_W * MUSE_PX_W;
         s_dy = 0;
     }
+}
 
+static void turn_screen(const muse_board_t *board)
+{
+    image_hide_locked();
+    xSemaphoreTake(s_image_mutex, portMAX_DELAY);
+    muse_board = board;
+    set_layout();
+    xSemaphoreGive(s_image_mutex);
+
+    lv_obj_clean(lv_screen_active());
+    lv_obj_clean(lv_layer_top());
+    s_canvas = s_mic_icon = s_aux_icon = s_ring = s_bar = NULL;
+    s_state_lbl = s_name_lbl = s_power_lbl = s_caption_lbl = s_reply_lbl = NULL;
+    s_wifi_icon = s_ble_icon = s_cover = s_image = NULL;
+    s_pair = s_pair_code = s_pair_title = s_pair_hint = NULL;
+    s_ptt_hint = s_spk_hint = s_pwr_hint = s_speaker = s_speaker_icon = NULL;
+#if CONFIG_MUSE_CLOCK
+    s_clock_lbl = NULL;
+#endif
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+    s_review_position = NULL;
+#endif
+#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
+    s_talk_hint_lbl = s_end_hint_lbl = NULL;
+#endif
+#if CONFIG_MUSE_WATCHER_CAMERA
+    s_camera_hint = NULL;
+#endif
+    memset(s_meter, 0, sizeof(s_meter));
+    memset(s_answers, 0, sizeof(s_answers));
+    s_answer = s_page_for = -1;
+    s_muse_up = false;
+#if CONFIG_MUSE_SMALL_FULL_REPLY
+    s_full_reply = s_caption_shown = false;
+    s_full_size = -1;
+#endif
+    s_shown_state = s_shown_lit = s_ring_value = s_shown_page = s_shown_speaker = -1;
+    s_shown_name = NULL;
+    s_meter_visible = true;
+    s_caption_version--;
+    s_next_power_update = s_next_settings_tick = 0;
+    s_last_epaper_pose = MUSE_MODE_COUNT;
+
+    build_screen();
+    muse_menu_build(lv_screen_active(), s_w, s_h);
+    build_overlays();
+    if (s_dark) {
+        lv_obj_set_style_bg_opa(s_cover, LV_OPA_COVER, 0);
+        lv_obj_remove_flag(s_cover, LV_OBJ_FLAG_HIDDEN);
+    }
+    ESP_LOGI(TAG, "screen turned: %dx%d, %d px Muse", s_w, s_h, s_canvas_px);
+}
+
+esp_err_t muse_ui_start(void)
+{
     lv_display_t *disp = muse_board->display_start(&s_indev);
     if (!disp) {
         ESP_LOGE(TAG, "display init failed");
@@ -2260,6 +2338,13 @@ esp_err_t muse_ui_start(void)
 
     s_image_mutex = xSemaphoreCreateMutex();
     muse_board->display_lock(-1);
+    if (muse_board->turned) {
+        const muse_board_t *board = muse_board->turned();
+        if (board) {
+            muse_board = board;
+        }
+    }
+    set_layout();
     build_screen();
     if (s_settings) {
         muse_settings_ui_build(s_settings);
@@ -2351,7 +2436,7 @@ void muse_ui_image_done(void)
     if (!s_ready || muse_ui_image_bits() != 2) {
         return;   /* a colour panel shows each rectangle as it comes */
     }
-    int16_t *err = malloc(2 * (size_t)(s_w + 2) * sizeof(int16_t));
+    int16_t *err = malloc(2 * (size_t)(LV_MAX(s_w, s_h) + 2) * sizeof(int16_t));
     if (!err) {
         return;   /* shown undithered: banded, but whole */
     }
@@ -2367,10 +2452,14 @@ void muse_ui_image_done(void)
 
 bool muse_ui_image_draw(int x, int y, int w, int h, const uint16_t *pixels)
 {
-    if (!s_ready || x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > s_w || y + h > s_h) {
+    if (!s_ready) {
         return false;
     }
     xSemaphoreTake(s_image_mutex, portMAX_DELAY);
+    if (x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > s_w || y + h > s_h) {
+        xSemaphoreGive(s_image_mutex);
+        return false;
+    }
     if (!s_image_buf) {
         /* The first rectangle of an image: a black screen to draw onto. */
         s_image_buf = heap_caps_calloc((size_t)s_w * s_h, sizeof(uint16_t), MALLOC_CAP_SPIRAM);

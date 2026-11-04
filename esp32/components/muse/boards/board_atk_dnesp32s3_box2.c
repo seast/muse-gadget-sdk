@@ -26,7 +26,7 @@
  * atk_dnesp32s3_box2.cc, power_manager.h). M is talk, R steps the menu, L turns the speaker on and
  * off and Q is power: a tap sleeps or wakes, a 2 s hold powers off. An SC7A20
  * accelerometer at 0x19, found on a unit (xiaozhi doesn't use it), turns the
- * picture the right way up when the box is turned over.
+ * picture the right way up as the box turns, landscape or portrait.
  */
 #include <stdlib.h>
 
@@ -114,9 +114,23 @@ static const char *TAG = "board";
 #define ACC_CTRL4 0x23
 #define ACC_OUT_X_L 0x28
 #define ACC_AUTO_INC 0x80
-#define TURN_MG 700                /* past this on Y the box is upright or turned over */
+#define TURN_MG 700                /* past this on X or Y the box stands on that edge */
 #define TURN_POLLS 50              /* poll_buttons() calls between readings: 0.5 s */
 #define AVATAR_PX 192
+
+typedef enum { WAY_UPRIGHT, WAY_OVER, WAY_LEFT, WAY_RIGHT, WAY_COUNT } way_t;
+
+static const char *const WAY_NAMES[WAY_COUNT] = { "upright", "over", "on its left side", "on its right side" };
+
+static const struct {
+    bool swap_xy, mirror_x, mirror_y;
+    muse_button_hint_t talk, aux;
+} WAYS[WAY_COUNT] = {
+    [WAY_UPRIGHT] = { true, true, false, { LV_ALIGN_TOP_MID, 0, 8 }, { LV_ALIGN_TOP_RIGHT, -8, 8 } },
+    [WAY_OVER] = { true, false, true, { LV_ALIGN_BOTTOM_MID, 0, -8 }, { LV_ALIGN_BOTTOM_LEFT, 8, -8 } },
+    [WAY_LEFT] = { false, true, true, { LV_ALIGN_LEFT_MID, 8, 0 }, { LV_ALIGN_LEFT_MID, 8, -(LCD_H_RES / 2 - 16) } },
+    [WAY_RIGHT] = { false, false, false, { LV_ALIGN_RIGHT_MID, -8, 0 }, { LV_ALIGN_BOTTOM_RIGHT, -8, -8 } },
+};
 
 static i2c_master_bus_handle_t s_i2c;
 static i2c_master_dev_handle_t s_xl;
@@ -137,7 +151,12 @@ static xl_key_t s_m, s_l, s_q;
 static uint8_t s_keys_idle;         /* port 0 at boot, keys up: L and Q read the other way pressed */
 static int64_t s_q_down_us;         /* when Q went down, for the power-off hold */
 static bool s_q_long;               /* and the hold's been reported */
-static bool s_flipped;              /* the picture turned 180 degrees */
+static lv_display_t *s_disp;
+static way_t s_way;
+static way_t s_shown;
+static volatile way_t s_wanted;
+static muse_board_t s_ways[WAY_COUNT];
+static const muse_board_t s_board;
 
 static esp_err_t xl_write(uint8_t reg, uint8_t val)
 {
@@ -227,18 +246,24 @@ static esp_err_t init(void)
     return muse_gpio_button_init(&s_aux, AUX_GPIO);
 }
 
-/* Whether the box is turned over, or false lying flat, on a side or unread. */
-static bool read_flip(bool *flip)
+/* The way the box stands, or false lying flat, in between or unread. */
+static bool read_way(way_t *way, int *x_mg, int *y_mg)
 {
     uint8_t reg = ACC_OUT_X_L | ACC_AUTO_INC, raw[6];
     if (!s_acc || i2c_master_transmit_receive(s_acc, &reg, 1, raw, sizeof(raw), 50) != ESP_OK) {
         return false;
     }
-    int y = (int16_t)(raw[2] | raw[3] << 8) / 16;   /* left-justified, about 1 mg a count */
-    if (abs(y) <= TURN_MG) {
+    int x = (int16_t)(raw[0] | raw[1] << 8) / 16;   /* left-justified, about 1 mg a count */
+    int y = (int16_t)(raw[2] | raw[3] << 8) / 16;
+    *x_mg = x;
+    *y_mg = y;
+    if (abs(y) >= abs(x) && abs(y) > TURN_MG) {
+        *way = y > 0 ? WAY_OVER : WAY_UPRIGHT;
+    } else if (abs(x) > TURN_MG) {
+        *way = x < 0 ? WAY_LEFT : WAY_RIGHT;
+    } else {
         return false;
     }
-    *flip = y > 0;
     return true;
 }
 
@@ -251,12 +276,30 @@ static void round_area(lv_event_t *e)
     a->y2 |= 1;
 }
 
-/* Landscape, turned as the V1.1 box turns the same panel; turned over, both
- * mirrors change. */
-static void set_flip(bool flipped)
+static void set_way(way_t way)
 {
-    esp_lcd_panel_mirror(s_panel, !flipped, flipped);
-    s_flipped = flipped;
+    esp_lcd_panel_swap_xy(s_panel, WAYS[way].swap_xy);
+    esp_lcd_panel_mirror(s_panel, WAYS[way].mirror_x, WAYS[way].mirror_y);
+    s_way = way;
+    if (s_disp) {
+        lv_display_set_resolution(s_disp, s_ways[way].width, s_ways[way].height);
+        lv_obj_invalidate(lv_display_get_screen_active(s_disp));
+        lv_obj_invalidate(lv_display_get_layer_top(s_disp));
+        lv_obj_invalidate(lv_display_get_layer_sys(s_disp));
+    }
+}
+
+static const muse_board_t *turned(void)
+{
+    way_t way = s_wanted;
+    if (way != s_way) {
+        set_way(way);
+    }
+    if (s_way == s_shown) {
+        return NULL;
+    }
+    s_shown = s_way;
+    return &s_ways[s_way];
 }
 
 static lv_display_t *display_start(lv_indev_t **touch)
@@ -359,11 +402,22 @@ static lv_display_t *display_start(lv_indev_t **touch)
     for (size_t i = 0; i < sizeof(tuning) / sizeof(tuning[0]); i++) {
         esp_lcd_panel_io_tx_param(io, tuning[i].cmd, tuning[i].data, tuning[i].len);
     }
-    /* Landscape, the right way up for how the box is held at boot. */
-    bool flip = false;
-    read_flip(&flip);
-    esp_lcd_panel_swap_xy(s_panel, true);
-    set_flip(flip);
+    /* The right way up for how the box is held at boot. */
+    for (int w = 0; w < WAY_COUNT; w++) {
+        s_ways[w] = s_board;
+        s_ways[w].talk_hint = WAYS[w].talk;
+        s_ways[w].aux_hint = WAYS[w].aux;
+        if (!WAYS[w].swap_xy) {
+            s_ways[w].width = LCD_V_RES;
+            s_ways[w].height = LCD_H_RES;
+        }
+    }
+    way_t way = WAY_UPRIGHT;
+    int x_mg, y_mg;
+    read_way(&way, &x_mg, &y_mg);
+    s_wanted = way;
+    s_shown = WAY_UPRIGHT;
+    set_way(way);
     esp_lcd_panel_disp_on_off(s_panel, true);
 
     esp_lv_adapter_config_t adapter_cfg = ESP_LV_ADAPTER_DEFAULT_CONFIG();
@@ -378,8 +432,8 @@ static lv_display_t *display_start(lv_indev_t **touch)
         .profile = {
             .interface = ESP_LV_ADAPTER_PANEL_IF_OTHER,
             .rotation = ESP_LV_ADAPTER_ROTATE_0,
-            .hor_res = LCD_H_RES,
-            .ver_res = LCD_V_RES,
+            .hor_res = s_ways[way].width,
+            .ver_res = s_ways[way].height,
             .buffer_height = DRAW_BUF_LINES,
             .use_psram = true,
             .require_double_buffer = true,
@@ -391,6 +445,7 @@ static lv_display_t *display_start(lv_indev_t **touch)
         return NULL;
     }
     lv_display_add_event_cb(disp, round_area, LV_EVENT_INVALIDATE_AREA, NULL);
+    s_disp = disp;
     if (esp_lv_adapter_start() != ESP_OK) {
         return NULL;
     }
@@ -507,35 +562,37 @@ static unsigned poll_expander(void)
     return ev | q;
 }
 
-/* Every half second: turns the picture once the box has been the other way
- * up for two readings in a row. Lying flat or on a side keeps it as it is. */
-static void check_flip(void)
+/* Every half second: turns the picture once the box has stood another way
+ * for two readings in a row. Lying flat keeps it as it is. */
+static void check_way(void)
 {
     static int polls, votes;
-    bool flip;
+    static way_t last;
+    way_t way;
+    int x_mg, y_mg;
     if (!s_acc || ++polls < TURN_POLLS) {
         return;
     }
     polls = 0;
-    if (!read_flip(&flip) || flip == s_flipped) {
+    if (!read_way(&way, &x_mg, &y_mg) || way == s_wanted) {
         votes = 0;
         return;
     }
-    if (++votes < 2 || !display_lock(100)) {
-        return;   /* not yet, or LVGL is busy: the next reading tries again */
+    if (way != last) {
+        last = way;
+        votes = 0;
+    }
+    if (++votes < 2) {
+        return;
     }
     votes = 0;
-    set_flip(flip);
-    lv_obj_invalidate(lv_display_get_screen_active(NULL));
-    lv_obj_invalidate(lv_display_get_layer_top(NULL));
-    lv_obj_invalidate(lv_display_get_layer_sys(NULL));
-    esp_lv_adapter_unlock();
-    ESP_LOGI(TAG, "picture turned %s", flip ? "over" : "upright");
+    s_wanted = way;
+    ESP_LOGI(TAG, "box %s (x %d, y %d mg)", WAY_NAMES[way], x_mg, y_mg);
 }
 
 static unsigned poll_buttons(void)
 {
-    check_flip();
+    check_way();
     return poll_expander() | muse_gpio_button_poll(&s_aux) << 2;
 }
 
@@ -648,6 +705,7 @@ static const muse_board_t s_board = {
     .display_start = display_start,
     .display_lock = display_lock,
     .display_unlock = esp_lv_adapter_unlock,
+    .turned = turned,
     .set_brightness = set_brightness,
     .panel_sleep = panel_sleep,
     .audio_init = audio_init,

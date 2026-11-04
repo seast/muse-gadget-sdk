@@ -73,13 +73,21 @@ Muse's sessions need. These are off unless the build's `sdkconfig` (or
 
 ## Screen
 
-- Landscape, 320×240, the way the box sits on a desk. Muse is 192 px wide,
-  three screen pixels to each of its 64. Turned over, the
-  picture turns with it within a second: the accelerometer is read twice a
-  second, and a turn counts after two readings. Lying flat or on a side keeps
-  it as it is.
-- The key icons sit along the top edge, M in the middle and R on the right;
-  they don't move when the picture turns over.
+- Landscape, 320×240, the way the box sits on a desk. Muse is 192 px wide
+  either way up, three screen pixels to each of its 64. The picture turns with
+  the box within a second: turned over, or stood on either side for portrait,
+  240×320, where the screen is laid out again for its shape (the tall compact
+  layout). The accelerometer is read twice a second, a turn
+  counts after two readings, and the log says each one (`board: box on its
+  left side (x -1003, y 12 mg)`). Lying flat keeps it as it is. The turned
+  layout comes from the board (`turned` in `muse_board.h`): an open menu
+  stays open, and a downloaded image goes.
+- The key icons sit along the keys' edge, M in the middle and R at its end,
+  and move with it: along the bottom turned over, down a side in portrait.
+- Checked on a unit: upright and turned over. Not yet: portrait, which takes
+  the panel's own address order or both mirrors (`WAYS` in the board file)
+  for the two sides. If the portrait picture comes up upside down, those two
+  rows are the wrong way round.
 - Captions show Chinese, Japanese and Korean (`CONFIG_MUSE_CJK_FONT`).
 - LVGL draws through two 40-line strips in PSRAM (`DRAW_BUF_LINES`, 50 KB),
   which the i80 bus sends by DMA. In internal RAM even 32 lines left Link and
@@ -118,14 +126,15 @@ Checked on one unit, powered over USB:
 
 Still to check:
 
-1. The 40-line strips in PSRAM: the picture whole, with no `Draw bitmap
+1. The picture in portrait on both sides (see Screen).
+2. The 40-line strips in PSRAM: the picture whole, with no `Draw bitmap
    failed` in the log, and internal RAM through a live call and a voice note
    (`min=` in the heartbeat should stay above about 8K).
-2. A boot on battery: the board stays on after the power key is released.
-3. Playback after the audio has rested on battery (asleep, unplugged) and
+3. A boot on battery: the board stays on after the power key is released.
+4. Playback after the audio has rested on battery (asleep, unplugged) and
    reopened: xiaozhi keeps the ES8389's output open for fear that reopening
    the duplex bus leaves it silent on IDF 6. On USB the audio never rests.
-4. The menu: volume changes and is kept across a restart.
-5. Battery: the percentage and the charging state.
-6. Power off on battery, and which key turns it back on; on USB, deep sleep
+5. The menu: volume changes and is kept across a restart.
+6. Battery: the percentage and the charging state.
+7. Power off on battery, and which key turns it back on; on USB, deep sleep
    and waking on R, M and Q.

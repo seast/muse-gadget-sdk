@@ -697,7 +697,8 @@ hardware verification checklist.
 ## ALIENTEK ATK-DNESP32S3-BOX2
 
 The BOX2 (Wi-Fi) runs its 240×320 ST7789 as 320×240 landscape, and an SC7A20
-accelerometer turns the picture over with the box. An ES8389 does the speaker
+accelerometer turns the picture with the box: over, or on either side to
+portrait, laid out again for the new shape. An ES8389 does the speaker
 and mic, and a 16-bit XL9555 holds the power latch, the amplifier, the charger
 lines and keys L, M and Q; R is GPIO0 (BOOT). M is push-to-talk, R the menu,
 L the speaker and Q power. The pins follow xiaozhi-esp32's board; it runs on
