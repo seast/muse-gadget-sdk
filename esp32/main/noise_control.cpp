@@ -15,6 +15,9 @@
  */
 
 #include "ble_commands.h"
+#if CONFIG_MUSE_DEVICE_COMMANDS
+#include "muse_commands.h"
+#endif
 #include "noise_control.h"
 #include "stack_monitor.h"
 #include "noise_upgrade.h"
@@ -1408,8 +1411,17 @@ static char *build_register_json(void) {
     add_command(commands, "device.health",
                 "Report basic Link health, including battery level (percent), "
                 "voltage, and whether it is charging or on USB power; each is "
-                "null when the device has no battery or can't measure it",
+                "null when the device has no battery or can't measure it"
+#if CONFIG_MUSE_DEVICE_COMMANDS
+                ". Also its network (IP address, Wi-Fi name and signal) and "
+                "where it thinks it is: place, coordinates, and whether Muse, "
+                "the IP address or the built-in default said so"
+#endif
+                ,
                 nullptr, nullptr);
+#if CONFIG_MUSE_DEVICE_COMMANDS
+    muse_commands_register(commands);
+#endif
 #if CONFIG_HOMEHUB_TUNNEL
     add_command(commands, "device.discover",
                 "Scan local network for devices (ARP, mDNS, SSDP, SNMP, NetBIOS)",
@@ -1747,6 +1759,9 @@ static void send_device_health(
     const esp_app_desc_t *desc = esp_app_get_description();
     cJSON_AddStringToObject(health, "version",
                             desc ? desc->version : "unknown");
+#if CONFIG_MUSE_DEVICE_COMMANDS
+    muse_commands_health(health);
+#endif
 
     char *payload = cJSON_PrintUnformatted(health);
     cJSON_Delete(health);

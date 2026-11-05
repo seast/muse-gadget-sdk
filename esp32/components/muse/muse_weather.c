@@ -78,6 +78,7 @@ static SemaphoreHandle_t s_answered;
 static char s_reply[512];
 static bool s_replied;
 static volatile uint32_t s_ask_gen;
+static int64_t s_located_us;
 
 void muse_weather_line(char *out, size_t cap)
 {
@@ -307,6 +308,9 @@ static bool fetch_weather(const place_t *p, source_t src)
             .day = !cJSON_IsNumber(day) || day->valueint != 0,
             .offset_known = cJSON_IsNumber(offset),
             .utc_offset_s = cJSON_IsNumber(offset) ? offset->valueint : 0,
+            .lat = p->lat,
+            .lon = p->lon,
+            .located_us = s_located_us,
         };
         strlcpy(w.place, p->name, sizeof(w.place));
         char line[sizeof(s_line)];
@@ -338,6 +342,7 @@ static void weather_task(void *arg)
             if (asked > 0) {
                 place = found;
                 src = SRC_MUSE;
+                s_located_us = now;
             }
             next_muse = now + (asked < 0 ? WEATHER_PERIOD_US : LOCATE_PERIOD_US);
         }
@@ -346,9 +351,11 @@ static void weather_task(void *arg)
                 place = found;
                 src = SRC_IP;
                 next_ip = now + LOCATE_PERIOD_US;
+                s_located_us = now;
             } else if (src == SRC_NONE && parse_place(CONFIG_MUSE_WEATHER_FALLBACK, &found)) {
                 place = found;
                 src = SRC_DEFAULT;
+                s_located_us = now;
             }
         }
         bool ok = src != SRC_NONE && fetch_weather(&place, src);

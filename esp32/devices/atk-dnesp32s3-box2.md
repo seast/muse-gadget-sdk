@@ -80,6 +80,15 @@ Muse's sessions need. These are off unless the build's `sdkconfig` (or
   The clock doesn't sleep. M, the menu and an image from Muse take the screen
   while they need it, and the clock comes back 3 s after Muse is idle.
   Checked on a unit in landscape and portrait.
+- `CONFIG_MUSE_DEVICE_COMMANDS=y`: commands Muse can call, so you can ask it
+  to change the box. `device.settings` sets the volume, speaker, mic gain,
+  brightness and screen (on, off or, with the clock screen, the clock);
+  `device.call` starts or ends a live call; `device.power_off` is the same as
+  holding Q (fully off on battery, asleep on USB); `device.restart` turns the
+  screen, audio, the analog 3.3 V rail and the chip off for a second and
+  boots again. `device.health` also reports the network (IP address, Wi-Fi
+  name and signal) and the location: the place, its coordinates, and whether
+  Muse, the IP address or the fallback gave it. Not yet checked on a unit.
 
 ## Controls
 

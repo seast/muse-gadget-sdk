@@ -684,6 +684,26 @@ static esp_err_t power_off(void)
     return ESP_FAIL;
 }
 
+static esp_err_t restart(void)
+{
+    set_brightness(0);
+    esp_lcd_panel_disp_on_off(s_panel, false);
+    panel_sleep(true);
+    if (s_spk) {
+        esp_codec_dev_close(s_spk);
+    }
+    if (s_mic) {
+        esp_codec_dev_close(s_mic);
+    }
+    xl_set(XL_SPK_EN, false);
+    xl_set(XL_EN_3V3A, false);
+    vTaskDelay(pdMS_TO_TICKS(300));
+    ESP_LOGI(TAG, "restarting through deep sleep");
+    ESP_RETURN_ON_ERROR(esp_sleep_enable_timer_wakeup(1000 * 1000), TAG, "restart timer");
+    esp_deep_sleep_start();
+    return ESP_FAIL;
+}
+
 static const muse_board_t s_board = {
     .name = "ALIENTEK ATK-DNESP32S3-BOX2",
     .width = LCD_H_RES,
@@ -714,6 +734,7 @@ static const muse_board_t s_board = {
     .poll_buttons = poll_buttons,
     .read_power = read_power,
     .power_off = power_off,
+    .restart = restart,
 };
 
 /* Home Link's app_main starts Muse with this board (main/main.c). */

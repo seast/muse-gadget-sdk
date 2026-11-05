@@ -85,3 +85,8 @@ void muse_input_touch_talk(bool pressed);
 
 /* Plays the goodbye animation and powers off (from the input task). */
 void muse_input_request_power_off(void);
+void muse_input_request_restart(void);
+
+typedef enum { MUSE_SCREEN_OFF, MUSE_SCREEN_ON, MUSE_SCREEN_CLOCK } muse_screen_t;
+void muse_input_request_screen(muse_screen_t screen);
+void muse_input_request_call(bool start);

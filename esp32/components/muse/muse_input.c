@@ -30,6 +30,7 @@
 #if CONFIG_PM_ENABLE
 #include "esp_pm.h"
 #include "esp_sleep.h"
+#include "esp_system.h"
 #endif
 
 #include "muse_battery.h"
@@ -106,6 +107,9 @@ void muse_input_clear_call_pending(uint32_t mark)
 }
 static bool s_cpu_low;      /* display stopped and the CPU allowed to sleep */
 static volatile bool s_power_off_requested;
+static volatile bool s_restart_requested;
+static atomic_int s_screen_request = -1;
+static atomic_int s_call_request = -1;
 static bool s_cpu_pd;       /* muse_input_power_init() holds the CPU's retention memory */
 #if CONFIG_PM_ENABLE
 static esp_pm_lock_handle_t s_awake;   /* with s_cpu_pd: held whenever !s_cpu_low */
@@ -137,6 +141,26 @@ static void post(muse_ptt_t type, bool wake)
 }
 
 static bool update_power(void);
+
+static void restart(void)
+{
+    ESP_LOGI(TAG, "restarting");
+    muse_voice_shutdown(3000);
+    muse_state_set_asleep(false);
+    muse_state_set_progress(0);
+    muse_state_set_level(0);
+    muse_state_set_mode(MUSE_MODE_OFF);
+    muse_state_set_caption("RESTARTING...");
+    vTaskDelay(pdMS_TO_TICKS(GOODBYE_MS));
+#if CONFIG_PM_ENABLE
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
+#endif
+    if (muse_board->restart) {
+        esp_err_t err = muse_board->restart();
+        ESP_LOGE(TAG, "board restart failed (%s)", esp_err_to_name(err));
+    }
+    esp_restart();
+}
 
 static void power_off(void)
 {
@@ -723,6 +747,29 @@ static void input_task(void *arg)
             s_power_off_requested = false;
             power_off();
         }
+        if (s_restart_requested) {
+            s_restart_requested = false;
+            restart();
+        }
+        int screen = atomic_exchange(&s_screen_request, -1);
+        if (screen == MUSE_SCREEN_OFF) {
+            set_asleep(true, "Muse");
+        } else if (screen >= 0) {
+            set_asleep(false, "Muse");
+            muse_state_poke();
+#if CONFIG_MUSE_CLOCK_SCREEN
+            muse_ui_set_clock(screen == MUSE_SCREEN_CLOCK);
+#endif
+        }
+        int call = atomic_exchange(&s_call_request, -1);
+        if (call == 1 && !muse_voice_in_call()) {
+            set_asleep(false, "Muse");
+            muse_state_poke();
+            post(MUSE_PTT_DOWN, false);
+            post(MUSE_PTT_UP, false);
+        } else if (call == 0 && muse_voice_in_call()) {
+            post(MUSE_PTT_END_CALL, false);
+        }
 
         TickType_t now = xTaskGetTickCount();
         if (now - checked >= pdMS_TO_TICKS(SLEEP_CHECK_MS)) {
@@ -1042,4 +1089,19 @@ esp_err_t muse_input_start(QueueHandle_t queue)
 void muse_input_request_power_off(void)
 {
     s_power_off_requested = true;
+}
+
+void muse_input_request_restart(void)
+{
+    s_restart_requested = true;
+}
+
+void muse_input_request_screen(muse_screen_t screen)
+{
+    atomic_store(&s_screen_request, (int)screen);
+}
+
+void muse_input_request_call(bool start)
+{
+    atomic_store(&s_call_request, start ? 1 : 0);
 }

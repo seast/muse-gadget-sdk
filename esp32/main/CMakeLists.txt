@@ -101,6 +101,9 @@ endif()
 if(CONFIG_MUSE_ENABLED)
     list(APPEND GADGET_SRCS "muse_glue.c")
 endif()
+if(CONFIG_MUSE_DEVICE_COMMANDS)
+    list(APPEND GADGET_SRCS "muse_commands.c")
+endif()
 
 # image_fetch.c: the P4 has no JPEG decoder in ROM, so it uses the peripheral.
 # Kconfig is not loaded yet when requirements expand.

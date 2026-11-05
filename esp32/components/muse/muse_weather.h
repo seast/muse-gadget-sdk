@@ -18,6 +18,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -34,6 +35,8 @@ typedef struct {
     bool day;
     bool offset_known;
     int utc_offset_s;
+    double lat, lon;
+    int64_t located_us;
 } muse_weather_t;
 
 void muse_weather_start(void);

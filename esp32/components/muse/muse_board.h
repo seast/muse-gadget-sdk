@@ -171,6 +171,7 @@ typedef struct muse_board_s {
     /* Turns the board off; returns only on failure. NULL: it can't from
      * software (a physical switch does), and Settings has no Power off. */
     esp_err_t (*power_off)(void);
+    esp_err_t (*restart)(void);
 } muse_board_t;
 
 /* The running board, set by muse_app_run() and by a board that turns. */

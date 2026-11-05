@@ -91,6 +91,9 @@
 #include "boards/p4_csi_camera.h"
 #define camera_capture_base64 p4_csi_camera_capture
 #endif
+#if CONFIG_MUSE_DEVICE_COMMANDS
+#include "muse_commands.h"
+#endif
 #if CONFIG_MUSE_ENABLED
 #include "muse_glue.h"
 #include "muse_input.h"
@@ -2025,6 +2028,11 @@ static cJSON *on_ws_command(
 #if CONFIG_HOMEHUB_WAVESHARE_154G_SHTC3
     if (strcmp(command, "sensors.read") == 0) {
         return waveshare_154g_shtc3_command();
+    }
+#endif
+#if CONFIG_MUSE_DEVICE_COMMANDS
+    if (muse_commands_handles(command)) {
+        return muse_commands_handle(command, params);
     }
 #endif
     if (strcmp(command, "device.reset_vm") == 0) {

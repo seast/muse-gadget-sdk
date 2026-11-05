@@ -495,6 +495,20 @@ menu "Muse"
         depends on MUSE_WEATHER
         default "San Jose|37.3382|-121.8863"
 
+    config MUSE_DEVICE_COMMANDS
+        bool "Let Muse control the gadget"
+        depends on MUSE_BOARD_ATK_DNESP32S3_BOX2
+        default n
+        help
+            Adds commands Muse can call, so you can ask it to change the
+            gadget: device.settings (volume, speaker, mic gain, brightness,
+            screen on, off or the clock), device.call (start or end a live
+            call), device.power_off and device.restart. Power off is the same
+            as holding the power key: on battery the gadget turns fully off
+            until its power key is pressed, and on USB power it sleeps until
+            a key press. Restart powers down the screen, audio and processor
+            for a second and boots again.
+
     config MUSE_CLOCK_SCREEN
         bool "Time and weather screen on the power key"
         depends on MUSE_CLOCK && MUSE_BOARD_ATK_DNESP32S3_BOX2
