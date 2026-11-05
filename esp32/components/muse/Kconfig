@@ -481,9 +481,11 @@ menu "Muse"
             from Muse: twice a day the gadget asks it, as a message in the
             chat you can see in the Muse app, where you are. If Muse can't
             tell, the location comes from the network's public IP address
-            (ipinfo.io), marked (IP), and failing that it's the fallback city
-            below, marked (default). The weather comes from Open-Meteo every
-            30 minutes.
+            (ipinfo.io), and failing that it's the fallback city below. It
+            asks again, and fetches the weather, when the gadget joins another
+            Wi-Fi network or is plugged in, once 30 minutes have passed since
+            the last check. The line ends with (M), (I) or (F) for which it
+            was. The weather comes from Open-Meteo every 30 minutes.
 
     config MUSE_WEATHER_FAHRENHEIT
         bool "Temperatures in Fahrenheit"
@@ -519,6 +521,18 @@ menu "Muse"
             to screen off, then back to Muse. A long press still powers off.
             The screen stays on while it shows, and gives way to Muse while
             it listens, thinks or answers.
+
+    config MUSE_CLOCK_MAIN
+        bool "Time and weather screen as the only screen"
+        depends on MUSE_CLOCK_SCREEN
+        default n
+        help
+            The time and weather screen replaces Muse's face: Muse sits in a
+            corner of it at 128 pixels, with what it's doing and its captions
+            under it. The talk button works as before. A tap of the power key
+            turns the screen off and on, and the screen turns off after the
+            sleep setting's idle time, as Muse's face does. Wi-Fi stays
+            connected while it's off, so Muse can still send commands.
 
     config MUSE_TAP_MS
         int "Longest talk-button press that's a tap (ms)"

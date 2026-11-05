@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/stream_buffer.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -51,6 +53,10 @@ esp_err_t muse_audio_read(int16_t *mono, size_t frames);
 
 /* Blocking write of `frames` mono samples to the speaker. */
 esp_err_t muse_audio_write(const int16_t *mono, size_t frames);
+void muse_audio_overlay(StreamBufferHandle_t mono);
+void muse_audio_overlay_end(void);
+void muse_audio_overlay_stop(void);
+bool muse_audio_overlay_active(void);
 
 /* RMS of a buffer in dBFS (-100 for silence). */
 float muse_audio_dbfs(const int16_t *mono, size_t frames);

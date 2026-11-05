@@ -18,8 +18,12 @@
 
 #include "lvgl.h"
 
+#include "muse_state.h"
+
 void muse_clock_view_build(lv_obj_t *parent, int w, int h);
 void muse_clock_view_forget(void);
 lv_obj_t *muse_clock_view_root(void);
 lv_obj_t *muse_clock_view_muse_slot(void);
+int muse_clock_view_muse_px(void);
 void muse_clock_view_update(void);
+void muse_clock_view_activity(muse_mode_t mode, const char *name, float level);

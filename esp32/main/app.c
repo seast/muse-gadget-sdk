@@ -2032,7 +2032,7 @@ static cJSON *on_ws_command(
 #endif
 #if CONFIG_MUSE_DEVICE_COMMANDS
     if (muse_commands_handles(command)) {
-        return muse_commands_handle(command, params);
+        return muse_commands_handle(command, params, request_id, session_generation);
     }
 #endif
     if (strcmp(command, "device.reset_vm") == 0) {

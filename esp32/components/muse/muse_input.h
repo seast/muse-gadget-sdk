@@ -90,3 +90,4 @@ void muse_input_request_restart(void);
 typedef enum { MUSE_SCREEN_OFF, MUSE_SCREEN_ON, MUSE_SCREEN_CLOCK } muse_screen_t;
 void muse_input_request_screen(muse_screen_t screen);
 void muse_input_request_call(bool start);
+uint32_t muse_input_presses(void);   /* counts key presses */

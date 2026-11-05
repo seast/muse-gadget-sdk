@@ -63,26 +63,40 @@ Muse's sessions need. These are off unless the build's `sdkconfig` (or
   weather, such as `San Jose 18°C Cloudy`. Twice a day the box asks Muse where
   you are, as a typed message that shows in the Muse app's chat; a press of M
   takes priority and the question waits for the next try. If Muse can't tell,
-  the location comes from the network's public IP (ipinfo.io), marked `(IP)`,
-  and failing that from `CONFIG_MUSE_WEATHER_FALLBACK` (`San Jose`), marked
-  `(default)`. The weather comes from Open-Meteo every 30 minutes, in °C
+  the location comes from the network's public IP (ipinfo.io), and failing
+  that from `CONFIG_MUSE_WEATHER_FALLBACK` (`San Jose`). Joining another
+  Wi-Fi network or plugging in (USB from a computer, or a charger while the
+  battery charges) checks the location and weather again, once 30 minutes
+  have passed since the last check; sooner, the check waits for the 30
+  minutes. The line ends with
+  where the place came from: `(M)` Muse, `(I)` the IP address, `(F)` the
+  fallback. The weather comes from Open-Meteo every 30 minutes, in °C
   (`CONFIG_MUSE_WEATHER_FAHRENHEIT=y` for °F). City names with accented
   letters show boxes: the line's font is Montserrat.
 - `CONFIG_MUSE_CLOCK_SCREEN=y` (needs `CONFIG_MUSE_CLOCK`): a clock screen
   after the factory firmware's, on key Q. A tap goes from Muse to the clock,
   then to screen off, then back to Muse; a 2 s hold still powers off. It
-  shows the weekday, date and time with seconds, and with `CONFIG_MUSE_WEATHER`
-  the place, an icon and word for the sky, the temperature, today's high and
-  low (landscape only) and the humidity, with Muse at 64 px in the corner.
-  Beside the humidity (under it in portrait) are Wi-Fi bars for the signal
+  shows the weekday, date and time, and with `CONFIG_MUSE_WEATHER`
+  the place with a badge for where it came from (M Muse, I the IP address, F
+  the fallback), an icon and word for the sky, the temperature, today's high and
+  low and the humidity, with Muse at 128 px in its own card. Above Muse are
+  the speaker (red and crossed out while it's off), Wi-Fi bars for the signal
   and the battery's level, green while charging and red at 15% or less, or
-  `USB` with no battery reading.
+  `USB` with no battery reading; under it are what Muse is doing, a level bar
+  while it listens or speaks and, in landscape, its captions.
   The clock doesn't sleep. M, the menu and an image from Muse take the screen
   while they need it, and the clock comes back 3 s after Muse is idle.
-  Checked on a unit in landscape and portrait.
+- `CONFIG_MUSE_CLOCK_MAIN=y` (needs `CONFIG_MUSE_CLOCK_SCREEN`): the clock
+  screen is the only screen, with no face to go back to. Muse listens, thinks
+  and answers in its card; M works as before. A tap of Q turns the screen off
+  and on, and the screen turns off after the sleep setting's idle time
+  (2 minutes by default). Wi-Fi stays connected while it's dark, so Muse's
+  commands still reach the box. The layout is checked on a unit; the sleep
+  not yet.
 - `CONFIG_MUSE_DEVICE_COMMANDS=y`: commands Muse can call, so you can ask it
   to change the box. `device.settings` sets the volume, speaker, mic gain,
-  brightness and screen (on, off or, with the clock screen, the clock);
+  brightness and screen (on, off or, with the clock screen and not
+  `CONFIG_MUSE_CLOCK_MAIN`, the clock);
   `device.call` starts or ends a live call; `device.power_off` is the same as
   holding Q (fully off on battery, asleep on USB); `device.restart` turns the
   screen, audio, the analog 3.3 V rail and the chip off for a second and
@@ -101,7 +115,7 @@ Muse's sessions need. These are off unless the build's `sdkconfig` (or
 - L (XL9555 P0.5): turns the speaker on and off.
 - Q (XL9555 P0.6, listed by xiaozhi but unused there): power. A tap turns
   the screen off or on (with `CONFIG_MUSE_CLOCK_SCREEN`, shows the clock
-  first), a 2 s hold powers off. Its resting level is read at
+  first, unless it's `CONFIG_MUSE_CLOCK_MAIN`), a 2 s hold powers off. Its resting level is read at
   boot, so either polarity works.
 
 ## Screen

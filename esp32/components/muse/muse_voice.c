@@ -83,6 +83,7 @@ static volatile float s_monitor_db = -100.0f;
 static volatile bool s_chirp;
 static volatile bool s_loopback;
 static volatile bool s_mp3test;
+
 static atomic_int s_call_view;
 static atomic_bool s_ptt_call;
 static atomic_bool s_shutdown;
@@ -1173,7 +1174,7 @@ static void voice_task(void *arg)
             muse_input_event_t ev;
             bool asleep = muse_state_asleep();
             bool battery = muse_state_on_battery();
-            bool rest = asleep && battery && !s_chirp && !s_mp3test && !s_loopback;
+            bool rest = asleep && battery && !s_chirp && !s_mp3test && !s_loopback && !muse_audio_overlay_active();
 #if HOLD_NOTES
             /* A press goes first: send_held() leaves it queued and returns
              * without backing off, so retrying before it's read would spin. */
@@ -1213,6 +1214,14 @@ static void voice_task(void *arg)
                     muse_audio_write(pcm + i, n - i < MUSE_AUDIO_CHUNK ? n - i : MUSE_AUDIO_CHUNK);
                 }
                 free(pcm);
+                pre_reset();
+            }
+            if (muse_audio_overlay_active()) {
+                static const int16_t quiet[MUSE_AUDIO_CHUNK];
+                while (muse_audio_overlay_active() && !press_waiting()) {
+                    muse_audio_write(quiet, MUSE_AUDIO_CHUNK);
+                }
+                muse_audio_overlay_stop();
                 pre_reset();
             }
             if (s_loopback) {

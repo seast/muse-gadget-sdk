@@ -98,6 +98,8 @@ static bool s_talk_down;
 static atomic_uint s_call_pending;
 static atomic_uint s_mark_seq;
 static atomic_uint s_call_epoch;
+static atomic_uint s_presses;
+uint32_t muse_input_presses(void) { return atomic_load(&s_presses); }
 uint32_t muse_input_call_epoch(void) { return atomic_load(&s_call_epoch); }
 void muse_input_clear_call_pending(uint32_t mark)
 {
@@ -469,7 +471,7 @@ static void check_sleep(void)
         return;
     }
     if (muse_voice_in_call()) return;
-#if CONFIG_MUSE_CLOCK_SCREEN
+#if CONFIG_MUSE_CLOCK_SCREEN && !CONFIG_MUSE_CLOCK_MAIN
     if (muse_ui_clock()) return;
 #endif
     int after = muse_settings_sleep_s();
@@ -622,7 +624,7 @@ static void power_release(void)
 {
     if (!s_power_down) return;
     s_power_down = false;
-#if CONFIG_MUSE_CLOCK_SCREEN
+#if CONFIG_MUSE_CLOCK_SCREEN && !CONFIG_MUSE_CLOCK_MAIN
     if (!s_power_swallow && !muse_ui_clock()) {
         ESP_LOGI(TAG, "clock (%s)", muse_board->power_button);
         muse_ui_set_clock(true);
@@ -697,11 +699,14 @@ static void input_task(void *arg)
 
     for (;;) {
         unsigned ev = muse_board->poll_buttons() | atomic_exchange(&s_touch_talk_events, 0);
-#if CONFIG_MUSE_VIDEO
-        /* Any press leaves the video view (its release then does nothing). */
         const unsigned presses = MUSE_BTN_TALK_PRESS | MUSE_BTN_AUX_PRESS | MUSE_BTN_POWER_PRESS |
                                  MUSE_BTN_SPEAKER_PRESS | MUSE_BTN_UP | MUSE_BTN_DOWN | MUSE_BTN_LEFT |
                                  MUSE_BTN_RIGHT | MUSE_BTN_ENTER | MUSE_BTN_ESCAPE;
+        if (ev & presses) {
+            atomic_fetch_add(&s_presses, 1);
+        }
+#if CONFIG_MUSE_VIDEO
+        /* Any press leaves the video view (its release then does nothing). */
         if ((ev & presses) && muse_video_is_open()) {
             muse_video_close();
             ev &= ~(presses | MUSE_BTN_POWER_LONG);

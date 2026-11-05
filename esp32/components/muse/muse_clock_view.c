@@ -25,10 +25,15 @@
 
 #include "muse_clock_art.h"
 #include "muse_lang.h"
-#include "muse_state.h"
+#include "muse_pixel.h"
+#include "muse_settings.h"
 #include "muse_wifi.h"
 #if CONFIG_MUSE_WEATHER
 #include "muse_weather.h"
+#endif
+
+#ifndef CONFIG_MUSE_HIDE_REPLY_CAPTIONS
+#define CONFIG_MUSE_HIDE_REPLY_CAPTIONS 0
 #endif
 
 #if CONFIG_MUSE_WEATHER_FAHRENHEIT
@@ -38,9 +43,9 @@
 #endif
 
 #if LV_FONT_MONTSERRAT_12
-#define FONT_TAG_SMALL (&lv_font_montserrat_12)
+#define FONT_SMALL (&lv_font_montserrat_12)
 #else
-#define FONT_TAG_SMALL (&lv_font_montserrat_14)
+#define FONT_SMALL (&lv_font_montserrat_14)
 #endif
 
 #define COLOR_CARD 0x1f222a
@@ -50,22 +55,28 @@
 #define COLOR_CITY 0x8fc3ff
 #define COLOR_WEEK 0xf0a030
 #define COLOR_MINUTES 0xf5a033
-#define COLOR_SECONDS 0x4cc46a
+#define COLOR_CHARGING 0x4cc46a
 #define COLOR_TAG 0x9fd8ff
 #define COLOR_ON_TAG 0x14202c
+#define COLOR_MUSE 0xb59bff
 #define COLOR_OFF 0x3a3f4b
 #define COLOR_LOW 0xe64c4c
+#define MUSE_PX (MUSE_PX_W * 2)
+#define MUSE_W 140
 #define BATTERY_W 22
 #define BATTERY_INNER (BATTERY_W - 2 - 4)
+#define LEVEL_W 96
 
 static lv_obj_t *s_root, *s_slot;
-static lv_obj_t *s_week, *s_date, *s_city, *s_icon;
-static lv_obj_t *s_hh, *s_mm, *s_ss, *s_tag;
-static lv_obj_t *s_temp, *s_range, *s_humidity;
-static lv_obj_t *s_bars[4], *s_battery, *s_battery_fill, *s_pct;
+static lv_obj_t *s_week, *s_date, *s_city, *s_source, *s_hh, *s_mm;
+static lv_obj_t *s_icon, *s_temp, *s_tag, *s_range, *s_humidity;
+static lv_obj_t *s_speaker, *s_bars[4], *s_battery, *s_battery_fill, *s_usb;
+static lv_obj_t *s_level, *s_level_fill, *s_state, *s_caption;
 static time_t s_shown_t;
-static int s_shown_lit, s_shown_fill;
-static uint32_t s_shown_battery_color;
+static int s_shown_lit, s_shown_fill, s_shown_speaker, s_shown_level, s_shown_mode;
+static uint32_t s_shown_battery_color, s_caption_version;
+static const char *s_shown_name;
+static char s_caption_text[MUSE_CAPTION_MAX];
 
 static lv_obj_t *card(lv_obj_t *parent, int x, int y, int w, int h, uint32_t bg)
 {
@@ -102,9 +113,9 @@ static lv_obj_t *text(lv_obj_t *parent, const lv_font_t *font, uint32_t color, c
     return l;
 }
 
-static lv_obj_t *tag(lv_obj_t *parent, const lv_font_t *font, uint32_t bg, const char *s)
+static lv_obj_t *tag(lv_obj_t *parent, uint32_t bg, const char *s)
 {
-    lv_obj_t *l = text(parent, font, COLOR_ON_TAG, s);
+    lv_obj_t *l = text(parent, FONT_SMALL, COLOR_ON_TAG, s);
     lv_obj_set_style_bg_color(l, lv_color_hex(bg), 0);
     lv_obj_set_style_bg_opa(l, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(l, 3, 0);
@@ -125,19 +136,84 @@ static lv_obj_t *rect(lv_obj_t *parent, int w, int h, uint32_t color)
     return r;
 }
 
+static lv_obj_t *row(lv_obj_t *parent, int gap)
+{
+    lv_obj_t *r = box(parent, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(r, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(r, gap, 0);
+    return r;
+}
+
+static void build_clock(lv_obj_t *c, int w)
+{
+    const int pad = 8;
+    lv_obj_t *head = row(c, 6);
+    lv_obj_set_pos(head, pad, pad);
+    s_week = tag(head, COLOR_WEEK, "---");
+    s_date = text(head, &lv_font_montserrat_16, COLOR_TEXT, "----/--/--");
+
+    lv_obj_t *place = row(c, 6);
+    lv_obj_set_pos(place, pad, pad + 24);
+    s_city = text(place, &lv_font_montserrat_16, COLOR_CITY, "");
+    lv_obj_set_style_max_width(s_city, w - 2 * pad - 6 - 20, 0);
+    lv_label_set_long_mode(s_city, LV_LABEL_LONG_MODE_DOTS);
+    s_source = tag(place, COLOR_DIM, "");
+    lv_obj_add_flag(s_source, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_t *time_row = box(c, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(time_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+    lv_obj_align(time_row, LV_ALIGN_BOTTOM_MID, 0, -2);
+    s_hh = text(time_row, &muse_font_clock_64, 0xffffff, "--");
+    text(time_row, &muse_font_clock_64, 0xffffff, ":");
+    s_mm = text(time_row, &muse_font_clock_64, COLOR_MINUTES, "--");
+}
+
+static void build_humidity(lv_obj_t *parent)
+{
+    lv_obj_t *r = row(parent, 2);
+    lv_obj_t *drop = lv_image_create(r);
+    lv_image_set_src(drop, &muse_clock_badge_humidity);
+    lv_image_set_scale(drop, 128);
+    lv_obj_set_size(drop, 16, 16);
+    lv_image_set_inner_align(drop, LV_IMAGE_ALIGN_CENTER);
+    s_humidity = text(r, FONT_SMALL, COLOR_TEXT, "--");
+}
+
+static void build_weather(lv_obj_t *c, bool tall)
+{
+    lv_obj_set_flex_flow(c, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(c, 6, 0);
+    if (tall) {
+        lv_obj_set_flex_align(c, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        s_icon = lv_image_create(c);
+        s_temp = text(c, &lv_font_montserrat_20, COLOR_TEXT, "--");
+        s_tag = tag(c, COLOR_TAG, "");
+        s_range = text(c, FONT_SMALL, COLOR_DIM, "");
+        build_humidity(c);
+    } else {
+        lv_obj_set_flex_align(c, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+        lv_obj_t *top = row(c, 8);
+        s_icon = lv_image_create(top);
+        s_temp = text(top, &lv_font_montserrat_28, COLOR_TEXT, "--");
+        lv_obj_t *low = row(c, 6);
+        s_tag = tag(low, COLOR_TAG, "");
+        build_humidity(low);
+        s_range = text(low, FONT_SMALL, COLOR_DIM, "");
+    }
+    lv_obj_add_flag(s_tag, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void build_status(lv_obj_t *parent)
 {
-    lv_obj_t *row = box(parent, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(row, 6, 0);
-    lv_obj_t *bars = box(row, LV_FLEX_FLOW_ROW);
+    lv_obj_t *r = row(parent, 8);
+    s_speaker = text(r, &lv_font_montserrat_14, COLOR_TEXT, "");
+    lv_obj_t *bars = box(r, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(bars, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
     lv_obj_set_style_pad_column(bars, 2, 0);
     for (int i = 0; i < 4; i++) {
         s_bars[i] = rect(bars, 3, 4 + 3 * i, COLOR_OFF);
     }
-    s_battery = box(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(s_battery, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    s_battery = row(r, 0);
     lv_obj_t *body = rect(s_battery, BATTERY_W, 12, 0);
     lv_obj_set_style_bg_opa(body, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_color(body, lv_color_hex(COLOR_TEXT), 0);
@@ -147,33 +223,40 @@ static void build_status(lv_obj_t *parent)
     s_battery_fill = rect(body, 0, lv_pct(100), COLOR_TEXT);
     rect(s_battery, 2, 5, COLOR_TEXT);
     lv_obj_add_flag(s_battery, LV_OBJ_FLAG_HIDDEN);
-    s_pct = text(row, &lv_font_montserrat_14, COLOR_TEXT, "");
-    s_shown_lit = s_shown_fill = -1;
-    s_shown_battery_color = 0;
+    s_usb = text(r, FONT_SMALL, COLOR_DIM, "");
 }
 
-static lv_obj_t *reading(lv_obj_t *parent, const lv_image_dsc_t *badge, const lv_font_t *font)
+static void build_muse(lv_obj_t *c, bool tall)
 {
-    lv_obj_t *row = box(parent, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(row, 10, 0);
-    lv_obj_t *img = lv_image_create(row);
-    lv_image_set_src(img, badge);
-    return text(row, font, COLOR_TEXT, "--");
+    lv_obj_set_flex_flow(c, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(c, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_top(c, tall ? 4 : 6, 0);
+    lv_obj_set_style_pad_hor(c, 6, 0);
+    lv_obj_set_style_pad_row(c, tall ? 1 : 2, 0);
+    build_status(c);
+    s_slot = lv_obj_create(c);
+    lv_obj_remove_style_all(s_slot);
+    lv_obj_set_size(s_slot, MUSE_PX, MUSE_PX);
+    lv_obj_remove_flag(s_slot, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    s_level = rect(c, LEVEL_W, 3, COLOR_OFF);
+    lv_obj_set_style_bg_opa(s_level, LV_OPA_TRANSP, 0);
+    s_level_fill = rect(s_level, 0, 3, COLOR_MUSE);
+    s_state = text(c, &lv_font_montserrat_14, COLOR_DIM, "");
+    lv_obj_set_width(s_state, lv_pct(100));
+    lv_obj_set_style_text_align(s_state, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(s_state, LV_LABEL_LONG_MODE_DOTS);
+    s_caption = text(c, FONT_SMALL, COLOR_TEXT, "");
+    lv_obj_set_width(s_caption, lv_pct(100));
+    lv_obj_set_flex_grow(s_caption, 1);
+    lv_obj_set_style_text_align(s_caption, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(s_caption, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_flag(s_caption, LV_OBJ_FLAG_HIDDEN, tall);
 }
 
 void muse_clock_view_build(lv_obj_t *parent, int w, int h)
 {
     bool tall = h > w;
     const int m = 6;
-    int pad = tall ? 10 : 12;
-    int top_h = tall ? 188 : 150;
-    int low_y = m + top_h + m;
-    int low_h = h - low_y - m;
-    int muse_w = tall ? 86 : 76;
-    int left_w = w - 3 * m - muse_w;
-    const lv_font_t *row_font = tall ? &lv_font_montserrat_16 : &lv_font_montserrat_20;
-    const lv_font_t *small = tall ? FONT_TAG_SMALL : &lv_font_montserrat_14;
 
     s_root = lv_obj_create(parent);
     lv_obj_remove_style_all(s_root);
@@ -183,64 +266,40 @@ void muse_clock_view_build(lv_obj_t *parent, int w, int h)
     lv_obj_remove_flag(s_root, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(s_root, LV_OBJ_FLAG_HIDDEN);
 
-    lv_obj_t *top = card(s_root, m, m, w - 2 * m, top_h, COLOR_CARD);
-    lv_obj_t *head = box(top, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(head, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(head, 6, 0);
-    lv_obj_set_pos(head, pad, pad);
-    s_week = tag(head, small, COLOR_WEEK, "---");
-    s_date = text(head, row_font, COLOR_TEXT, "----/--/--");
-    s_city = text(top, row_font, COLOR_CITY, "");
-    lv_obj_set_width(s_city, w - 2 * m - 2 * pad - 48 - 6);
-    lv_label_set_long_mode(s_city, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_set_pos(s_city, pad, pad + (tall ? 26 : 30));
-    s_icon = lv_image_create(top);
-    lv_obj_align(s_icon, LV_ALIGN_TOP_RIGHT, -pad + 2, pad - 4);
-
-    const lv_font_t *big = tall ? &muse_font_clock_64 : &muse_font_clock_84;
-    int below = pad + (tall ? 26 : 30) + lv_font_get_line_height(row_font);
-    lv_obj_t *time_row = box(top, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(time_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
-    lv_obj_set_pos(time_row, pad - 2, below + (top_h - below - lv_font_get_line_height(big)) / 2);
-    s_hh = text(time_row, big, 0xffffff, "--");
-    text(time_row, big, 0xffffff, ":");
-    s_mm = text(time_row, big, COLOR_MINUTES, "--");
-    lv_obj_t *side = box(time_row, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(side, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_left(side, 6, 0);
-    lv_obj_set_style_pad_row(side, tall ? 4 : 6, 0);
-    s_tag = tag(side, small, COLOR_TAG, "");
-    lv_obj_add_flag(s_tag, LV_OBJ_FLAG_HIDDEN);
-    s_ss = text(side, &muse_font_clock_40, COLOR_SECONDS, "--");
-
-    lv_obj_t *low = card(s_root, m, low_y, left_w, low_h, COLOR_CARD);
-    lv_obj_set_flex_flow(low, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(low, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_hor(low, pad, 0);
-    s_temp = reading(low, &muse_clock_badge_temp, &lv_font_montserrat_20);
-    s_range = text(lv_obj_get_parent(s_temp), &lv_font_montserrat_14, COLOR_DIM, "");
-    lv_obj_set_flag(s_range, LV_OBJ_FLAG_HIDDEN, tall);
-    s_humidity = reading(low, &muse_clock_badge_humidity, &lv_font_montserrat_20);
+    lv_obj_t *clock, *weather, *muse;
+    int clock_w;
     if (tall) {
-        build_status(low);
+        int clock_h = 128, low_y = 2 * m + clock_h, low_h = h - low_y - m;
+        clock_w = w - 2 * m;
+        clock = card(s_root, m, m, clock_w, clock_h, COLOR_CARD);
+        weather = card(s_root, m, low_y, w - 3 * m - MUSE_W, low_h, COLOR_CARD);
+        muse = card(s_root, w - m - MUSE_W, low_y, MUSE_W, low_h, 0x000000);
     } else {
-        lv_obj_t *row = lv_obj_get_parent(s_humidity);
-        lv_obj_set_width(row, lv_pct(100));
-        lv_obj_set_flex_grow(s_humidity, 1);
-        build_status(row);
+        int clock_h = 132;
+        clock_w = w - 3 * m - MUSE_W;
+        clock = card(s_root, m, m, clock_w, clock_h, COLOR_CARD);
+        weather = card(s_root, m, 2 * m + clock_h, clock_w, h - 3 * m - clock_h, COLOR_CARD);
+        muse = card(s_root, 2 * m + clock_w, m, MUSE_W, h - 2 * m, 0x000000);
     }
+    build_clock(clock, clock_w);
+    build_weather(weather, tall);
+    build_muse(muse, tall);
 
-    s_slot = card(s_root, w - m - muse_w, low_y, muse_w, low_h, 0x000000);
     s_shown_t = 0;
+    s_shown_lit = s_shown_fill = s_shown_speaker = s_shown_level = s_shown_mode = -1;
+    s_shown_battery_color = 0;
+    s_shown_name = NULL;
+    s_caption_version = 0;
+    s_caption_text[0] = '\0';
 }
 
 void muse_clock_view_forget(void)
 {
     s_root = s_slot = NULL;
-    s_week = s_date = s_city = s_icon = NULL;
-    s_hh = s_mm = s_ss = s_tag = NULL;
-    s_temp = s_range = s_humidity = NULL;
-    s_battery = s_battery_fill = s_pct = NULL;
+    s_week = s_date = s_city = s_source = s_hh = s_mm = NULL;
+    s_icon = s_temp = s_tag = s_range = s_humidity = NULL;
+    s_speaker = s_battery = s_battery_fill = s_usb = NULL;
+    s_level = s_level_fill = s_state = s_caption = NULL;
     memset(s_bars, 0, sizeof(s_bars));
 }
 
@@ -254,6 +313,11 @@ lv_obj_t *muse_clock_view_muse_slot(void)
     return s_slot;
 }
 
+int muse_clock_view_muse_px(void)
+{
+    return MUSE_PX;
+}
+
 static void set_text(lv_obj_t *l, const char *s)
 {
     if (strcmp(lv_label_get_text(l), s) != 0) {
@@ -263,6 +327,12 @@ static void set_text(lv_obj_t *l, const char *s)
 
 static void update_status(void)
 {
+    int speaker = muse_settings_speaker_on();
+    if (speaker != s_shown_speaker) {
+        s_shown_speaker = speaker;
+        lv_label_set_text(s_speaker, speaker ? LV_SYMBOL_VOLUME_MAX : LV_SYMBOL_MUTE);
+        lv_obj_set_style_text_color(s_speaker, lv_color_hex(speaker ? COLOR_TEXT : COLOR_LOW), 0);
+    }
     muse_wifi_status_t w;
     muse_wifi_status(&w);
     int lit = w.state != MUSE_WIFI_CONNECTED ? 0
@@ -278,26 +348,23 @@ static void update_status(void)
     }
 
     muse_power_t p = muse_state_power();
-    char buf[24];
     if (p.battery_pct < 0) {
         lv_obj_add_flag(s_battery, LV_OBJ_FLAG_HIDDEN);
-        set_text(s_pct, p.usb ? "USB" : "");
+        set_text(s_usb, p.usb ? "USB" : "");
         return;
     }
     lv_obj_remove_flag(s_battery, LV_OBJ_FLAG_HIDDEN);
+    set_text(s_usb, "");
     int fill = p.battery_pct > 0 ? LV_MAX(1, BATTERY_INNER * p.battery_pct / 100) : 0;
     if (fill != s_shown_fill) {
         s_shown_fill = fill;
         lv_obj_set_width(s_battery_fill, fill);
     }
-    uint32_t color = p.charging ? COLOR_SECONDS : p.battery_pct <= 15 ? COLOR_LOW : COLOR_TEXT;
+    uint32_t color = p.charging ? COLOR_CHARGING : p.battery_pct <= 15 ? COLOR_LOW : COLOR_TEXT;
     if (color != s_shown_battery_color) {
         s_shown_battery_color = color;
         lv_obj_set_style_bg_color(s_battery_fill, lv_color_hex(color), 0);
-        lv_obj_set_style_text_color(s_pct, lv_color_hex(color), 0);
     }
-    snprintf(buf, sizeof(buf), "%s%d%%", p.charging ? LV_SYMBOL_CHARGE " " : "", p.battery_pct);
-    set_text(s_pct, buf);
 }
 
 #if CONFIG_MUSE_WEATHER
@@ -332,8 +399,21 @@ static void update_weather(void)
         return;
     }
     if (strcmp(lv_label_get_text(s_city), w.place) != 0) {
-        lv_obj_set_style_text_font(s_city, muse_lang_label_font(w.place, lv_obj_get_style_text_font(s_date, 0)), 0);
+        lv_obj_set_style_text_font(s_city, muse_lang_label_font(w.place, &lv_font_montserrat_16), 0);
         lv_label_set_text(s_city, w.place);
+    }
+    static const struct {
+        const char *mark;
+        uint32_t color;
+    } SOURCES[] = {
+        [MUSE_WEATHER_FROM_MUSE] = { "M", COLOR_MUSE },
+        [MUSE_WEATHER_FROM_IP] = { "I", COLOR_TAG },
+        [MUSE_WEATHER_FROM_DEFAULT] = { "F", COLOR_DIM },
+    };
+    if (strcmp(lv_label_get_text(s_source), SOURCES[w.from].mark) != 0) {
+        lv_label_set_text(s_source, SOURCES[w.from].mark);
+        lv_obj_set_style_bg_color(s_source, lv_color_hex(SOURCES[w.from].color), 0);
+        lv_obj_remove_flag(s_source, LV_OBJ_FLAG_HIDDEN);
     }
     char buf[32];
     snprintf(buf, sizeof(buf), "%ld" UNIT_MARK, lroundf(w.temp));
@@ -343,7 +423,7 @@ static void update_weather(void)
         set_text(s_humidity, buf);
     }
     if (!isnan(w.high) && !isnan(w.low)) {
-        snprintf(buf, sizeof(buf), "H %ld°  L %ld°", lroundf(w.high), lroundf(w.low));
+        snprintf(buf, sizeof(buf), "%ld°/%ld°", lroundf(w.high), lroundf(w.low));
         set_text(s_range, buf);
     }
     const char *cond = short_condition(w.code);
@@ -374,8 +454,6 @@ void muse_clock_view_update(void)
         set_text(s_hh, buf);
         snprintf(buf, sizeof(buf), "%02d", tm.tm_min);
         set_text(s_mm, buf);
-        snprintf(buf, sizeof(buf), "%02d", tm.tm_sec);
-        set_text(s_ss, buf);
         set_text(s_week, WEEK[tm.tm_wday]);
         strftime(buf, sizeof(buf), "%Y/%m/%d", &tm);
         set_text(s_date, buf);
@@ -384,4 +462,39 @@ void muse_clock_view_update(void)
 #if CONFIG_MUSE_WEATHER
     update_weather();
 #endif
+}
+
+void muse_clock_view_activity(muse_mode_t mode, const char *name, float level)
+{
+    if (!s_root) {
+        return;
+    }
+    uint32_t accent = muse_pixel_accent(mode);
+    if (name != s_shown_name) {
+        const char *shown = muse_lang_status(name);
+        lv_obj_set_style_text_font(s_state, muse_lang_label_font(shown, &lv_font_montserrat_14), 0);
+        lv_label_set_text(s_state, shown);
+        s_shown_name = name;
+    }
+    if ((int)mode != s_shown_mode) {
+        s_shown_mode = (int)mode;
+        lv_obj_set_style_text_color(s_state, lv_color_hex(accent), 0);
+        lv_obj_set_style_bg_color(s_level_fill, lv_color_hex(accent), 0);
+    }
+
+    bool heard = mode == MUSE_MODE_LISTENING || mode == MUSE_MODE_SPEAKING;
+    int lit = heard ? LV_CLAMP(0, (int)lroundf(level * LEVEL_W), LEVEL_W) : -1;
+    if (lit != s_shown_level) {
+        lv_obj_set_style_bg_opa(s_level, lit < 0 ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+        lv_obj_set_width(s_level_fill, LV_MAX(lit, 0));
+        s_shown_level = lit;
+    }
+
+    muse_state_caption(s_caption_text, sizeof(s_caption_text), &s_caption_version);
+    bool reply = mode == MUSE_MODE_THINKING || mode == MUSE_MODE_SPEAKING;
+    const char *caption = CONFIG_MUSE_HIDE_REPLY_CAPTIONS && reply ? "" : s_caption_text;
+    if (strcmp(lv_label_get_text(s_caption), caption) != 0) {
+        lv_obj_set_style_text_font(s_caption, muse_lang_label_font(caption, FONT_SMALL), 0);
+        lv_label_set_text(s_caption, caption);
+    }
 }

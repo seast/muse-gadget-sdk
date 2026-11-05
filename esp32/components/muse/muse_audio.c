@@ -27,6 +27,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/stream_buffer.h"
 #include "freertos/task.h"
 
 #include "muse_board.h"
@@ -47,6 +48,9 @@ static SemaphoreHandle_t s_lock;
 static int16_t s_in_stereo[MUSE_AUDIO_CHUNK * CHANNELS];
 static int16_t s_in_mono[MUSE_AUDIO_CHUNK];
 static int16_t s_out_stereo[MUSE_AUDIO_CHUNK * CHANNELS];
+static StreamBufferHandle_t volatile s_overlay;
+static volatile bool s_overlay_end;
+static int16_t s_overlay_buf[MUSE_AUDIO_CHUNK];
 
 /* One-pole high-pass on the mixed mic signal. */
 static float s_hpf_a;
@@ -430,9 +434,23 @@ esp_err_t muse_audio_write(const int16_t *mono, size_t frames)
     bool mute = !muse_settings_speaker_on();
     while (frames) {
         size_t n = frames > MUSE_AUDIO_CHUNK ? MUSE_AUDIO_CHUNK : frames;
+        StreamBufferHandle_t ov = s_overlay;
+        size_t got = 0;
+        if (ov) {
+            bool end = s_overlay_end;
+            got = xStreamBufferReceive(ov, s_overlay_buf, n * sizeof(int16_t), 0) / sizeof(int16_t);
+            if (!got && end && ov == s_overlay) {
+                s_overlay = NULL;
+            }
+        }
         for (size_t i = 0; i < n; i++) {
-            s_out_stereo[2 * i] = mute ? 0 : mono[i];
-            s_out_stereo[2 * i + 1] = mute ? 0 : mono[i];
+            int v = mono[i];
+            if (i < got) {
+                v += s_overlay_buf[i];
+                v = v > INT16_MAX ? INT16_MAX : v < INT16_MIN ? INT16_MIN : v;
+            }
+            s_out_stereo[2 * i] = mute ? 0 : (int16_t)v;
+            s_out_stereo[2 * i + 1] = mute ? 0 : (int16_t)v;
         }
         if (esp_codec_dev_write(s_spk, s_out_stereo, n * CHANNELS * sizeof(int16_t)) != ESP_CODEC_DEV_OK) {
             return ESP_FAIL;
@@ -441,6 +459,27 @@ esp_err_t muse_audio_write(const int16_t *mono, size_t frames)
         frames -= n;
     }
     return ESP_OK;
+}
+
+void muse_audio_overlay(StreamBufferHandle_t mono)
+{
+    s_overlay_end = false;
+    s_overlay = mono;
+}
+
+void muse_audio_overlay_end(void)
+{
+    s_overlay_end = true;
+}
+
+void muse_audio_overlay_stop(void)
+{
+    s_overlay = NULL;
+}
+
+bool muse_audio_overlay_active(void)
+{
+    return s_overlay != NULL;
 }
 
 float muse_audio_dbfs(const int16_t *mono, size_t frames)

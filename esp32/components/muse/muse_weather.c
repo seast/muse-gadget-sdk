@@ -33,6 +33,7 @@
 #include "freertos/task.h"
 
 #include "muse_chat.h"
+#include "muse_state.h"
 #include "muse_wifi.h"
 
 static const char *TAG = "muse_weather";
@@ -40,6 +41,8 @@ static const char *TAG = "muse_weather";
 #define WEATHER_PERIOD_US (30 * 60 * 1000000LL)
 #define RETRY_US (2 * 60 * 1000000LL)
 #define LOCATE_PERIOD_US (12 * 3600 * 1000000LL)
+#define RELOCATE_GAP_US (30 * 60 * 1000000LL)
+#define POLL_MS 5000
 #define ASK_WAIT_MS (6 * 60 * 1000)
 #define MAX_RESPONSE 4096
 #define PLACE_NAME_MAX 32
@@ -315,7 +318,7 @@ static bool fetch_weather(const place_t *p, source_t src)
         strlcpy(w.place, p->name, sizeof(w.place));
         char line[sizeof(s_line)];
         snprintf(line, sizeof(line), "%s %ld" UNIT_MARK " %s%s", p->name, lround(temp->valuedouble),
-                 muse_weather_condition(code->valueint), src == SRC_IP ? " (IP)" : src == SRC_DEFAULT ? " (default)" : "");
+                 muse_weather_condition(code->valueint), src == SRC_MUSE ? " (M)" : src == SRC_IP ? " (I)" : " (F)");
         set_weather(line, &w);
         ESP_LOGI(TAG, "%s", line);
     }
@@ -328,38 +331,67 @@ static void weather_task(void *arg)
     (void)arg;
     place_t place = { 0 }, found;
     source_t src = SRC_NONE;
-    int64_t next_muse = 0, next_ip = 0;
+    int64_t next_muse = 0, next_ip = 0, next_weather = 0, checked = 0;
+    char ssid[MUSE_SSID_MAX + 1] = "";
+    bool usb = false, moved = false;
     for (;;) {
         muse_wifi_status_t w;
         muse_wifi_status(&w);
+        bool plugged = muse_state_power().usb;
+        if (src != SRC_NONE && plugged && !usb && !moved) {
+            ESP_LOGI(TAG, "plugged in: the location is checked again");
+            moved = true;
+        }
+        usb = plugged;
         if (w.state != MUSE_WIFI_CONNECTED) {
-            vTaskDelay(pdMS_TO_TICKS(5000));
+            vTaskDelay(pdMS_TO_TICKS(POLL_MS));
             continue;
         }
+        if (src != SRC_NONE && ssid[0] && strcmp(ssid, w.ssid) != 0 && !moved) {
+            ESP_LOGI(TAG, "on another Wi-Fi network: the location is checked again");
+            moved = true;
+        }
+        strlcpy(ssid, w.ssid, sizeof(ssid));
         int64_t now = esp_timer_get_time();
+        bool relocate = moved && now - checked >= RELOCATE_GAP_US;
+        if (relocate) {
+            moved = false;
+            next_muse = next_ip = now;
+        }
+        bool located = false;
         if (now >= next_muse) {
+            checked = now;
             int asked = ask_muse(&found);
             if (asked > 0) {
                 place = found;
                 src = SRC_MUSE;
                 s_located_us = now;
+                located = true;
             }
             next_muse = now + (asked < 0 ? WEATHER_PERIOD_US : LOCATE_PERIOD_US);
         }
-        if (src != SRC_MUSE && (src != SRC_IP || now >= next_ip)) {
+        if (!located && (src != SRC_MUSE || relocate) && now >= next_ip) {
+            checked = now;
             if (ip_place(&found)) {
                 place = found;
                 src = SRC_IP;
                 next_ip = now + LOCATE_PERIOD_US;
                 s_located_us = now;
-            } else if (src == SRC_NONE && parse_place(CONFIG_MUSE_WEATHER_FALLBACK, &found)) {
-                place = found;
-                src = SRC_DEFAULT;
-                s_located_us = now;
+                located = true;
+            } else {
+                if (src == SRC_NONE && parse_place(CONFIG_MUSE_WEATHER_FALLBACK, &found)) {
+                    place = found;
+                    src = SRC_DEFAULT;
+                    s_located_us = now;
+                    located = true;
+                }
+                next_ip = now + (src == SRC_NONE ? RETRY_US : WEATHER_PERIOD_US);
             }
         }
-        bool ok = src != SRC_NONE && fetch_weather(&place, src);
-        vTaskDelay(pdMS_TO_TICKS((ok ? WEATHER_PERIOD_US : RETRY_US) / 1000));
+        if (src != SRC_NONE && (located || now >= next_weather)) {
+            next_weather = now + (fetch_weather(&place, src) ? WEATHER_PERIOD_US : RETRY_US);
+        }
+        vTaskDelay(pdMS_TO_TICKS(POLL_MS));
     }
 }
 

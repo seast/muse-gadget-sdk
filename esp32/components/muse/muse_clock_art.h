@@ -18,9 +18,7 @@
 
 #include "lvgl.h"
 
-LV_FONT_DECLARE(muse_font_clock_40);
 LV_FONT_DECLARE(muse_font_clock_64);
-LV_FONT_DECLARE(muse_font_clock_84);
 
 LV_IMAGE_DECLARE(muse_clock_icon_sun);
 LV_IMAGE_DECLARE(muse_clock_icon_moon);

@@ -76,6 +76,9 @@ static const char *TAG = "muse_ui";
 #ifndef CONFIG_MUSE_HIDE_REPLY_CAPTIONS
 #define CONFIG_MUSE_HIDE_REPLY_CAPTIONS 0
 #endif
+#ifndef CONFIG_MUSE_CLOCK_MAIN
+#define CONFIG_MUSE_CLOCK_MAIN 0
+#endif
 
 #define METER_SEGS 14
 #define METER_SEG_PX 9
@@ -2220,7 +2223,7 @@ void muse_ui_set_clock(bool on)
 
 bool muse_ui_clock(void)
 {
-    return s_clock_on;
+    return s_clock_on || CONFIG_MUSE_CLOCK_MAIN;
 }
 
 static void set_clock_shown(bool on)
@@ -2237,7 +2240,7 @@ static void set_clock_shown(bool on)
         s_saved_px = (int)s_muse_src.header.w;
         muse_clock_view_update();
         lv_obj_set_parent(s_canvas, muse_clock_view_muse_slot());
-        set_canvas_px(MUSE_PX_W);
+        set_canvas_px(muse_clock_view_muse_px());
         lv_obj_center(s_canvas);
         lv_obj_remove_flag(root, LV_OBJ_FLAG_HIDDEN);
     } else {
@@ -2254,6 +2257,9 @@ static void set_clock_shown(bool on)
 
 static bool clock_wanted(muse_mode_t mode, float mode_t)
 {
+    if (CONFIG_MUSE_CLOCK_MAIN) {
+        return true;
+    }
     return s_clock_on && mode == MUSE_MODE_IDLE && mode_t >= CLOCK_AFTER_IDLE_S && !muse_voice_in_call() &&
            (!s_pair || lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN));
 }
@@ -2353,6 +2359,9 @@ static void frame_tick(lv_timer_t *timer)
 
 #if CONFIG_MUSE_CLOCK_SCREEN
     if (s_clock_shown) {
+        const char *call_name = muse_voice_call_label();
+        muse_clock_view_activity(mode, call_name ? call_name : mode == MUSE_MODE_IDLE ? s_idle_name : MODE_NAMES[mode],
+                                 s_level);
         update_power(now);
         return;
     }

@@ -19,6 +19,7 @@
 #include <stdbool.h>
 
 #include "cJSON.h"
+#include "noise_control.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,7 +27,8 @@ extern "C" {
 
 void muse_commands_register(cJSON *commands);
 bool muse_commands_handles(const char *command);
-cJSON *muse_commands_handle(const char *command, const cJSON *params);
+cJSON *muse_commands_handle(const char *command, const cJSON *params, const char *request_id,
+                            noise_ctrl_session_generation_t session_generation);
 void muse_commands_health(cJSON *health);
 
 #ifdef __cplusplus
