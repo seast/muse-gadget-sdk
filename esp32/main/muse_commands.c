@@ -236,9 +236,12 @@ void muse_commands_health(cJSON *health)
     };
     static const char *const HOW[] = {
         [MUSE_WEATHER_FROM_MUSE] =
-            "Muse said where you are when the gadget asked. It asks every 12 hours, and again when the gadget "
-            "joins another Wi-Fi network or is plugged in, at most every 30 minutes.",
-        [MUSE_WEATHER_FROM_IP] = "From the network's public IP address (ipinfo.io), as Muse couldn't tell.",
+            "Muse said where you are when the gadget asked, which it uses for 30 minutes (or longer if the IP "
+            "address gives no place). It asks every 12 hours, and again when the gadget joins another Wi-Fi "
+            "network or is plugged in, at most every 30 minutes.",
+        [MUSE_WEATHER_FROM_IP] =
+            "From the network's public IP address (ipinfo.io), as Muse's answer is over 30 minutes old or Muse "
+            "couldn't tell.",
         [MUSE_WEATHER_FROM_DEFAULT] = "The built-in fallback, as neither Muse nor the IP address gave a place.",
     };
     cJSON *loc = cJSON_AddObjectToObject(health, "location");

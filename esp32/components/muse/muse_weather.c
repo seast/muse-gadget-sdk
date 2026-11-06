@@ -42,6 +42,7 @@ static const char *TAG = "muse_weather";
 #define RETRY_US (2 * 60 * 1000000LL)
 #define LOCATE_PERIOD_US (12 * 3600 * 1000000LL)
 #define RELOCATE_GAP_US (30 * 60 * 1000000LL)
+#define MUSE_FRESH_US (30 * 60 * 1000000LL)
 #define POLL_MS 5000
 #define ASK_WAIT_MS (6 * 60 * 1000)
 #define MAX_RESPONSE 4096
@@ -329,9 +330,10 @@ static bool fetch_weather(const place_t *p, source_t src)
 static void weather_task(void *arg)
 {
     (void)arg;
-    place_t place = { 0 }, found;
+    place_t place = { 0 }, from_muse, from_ip, found;
     source_t src = SRC_NONE;
-    int64_t next_muse = 0, next_ip = 0, next_weather = 0, checked = 0;
+    bool have_muse = false, have_ip = false;
+    int64_t next_muse = 0, next_ip = 0, next_weather = 0, checked = 0, muse_at = 0, ip_at = 0, default_at = 0;
     char ssid[MUSE_SSID_MAX + 1] = "";
     bool usb = false, moved = false;
     for (;;) {
@@ -358,37 +360,55 @@ static void weather_task(void *arg)
             moved = false;
             next_muse = next_ip = now;
         }
-        bool located = false;
         if (now >= next_muse) {
             checked = now;
             int asked = ask_muse(&found);
             if (asked > 0) {
-                place = found;
-                src = SRC_MUSE;
-                s_located_us = now;
-                located = true;
+                from_muse = found;
+                have_muse = true;
+                muse_at = now;
             }
             next_muse = now + (asked < 0 ? WEATHER_PERIOD_US : LOCATE_PERIOD_US);
         }
-        if (!located && (src != SRC_MUSE || relocate) && now >= next_ip) {
+        bool muse_fresh = have_muse && now - muse_at <= MUSE_FRESH_US;
+        if (!muse_fresh && now >= next_ip) {
             checked = now;
             if (ip_place(&found)) {
-                place = found;
-                src = SRC_IP;
+                from_ip = found;
+                have_ip = true;
+                ip_at = now;
                 next_ip = now + LOCATE_PERIOD_US;
-                s_located_us = now;
-                located = true;
             } else {
-                if (src == SRC_NONE && parse_place(CONFIG_MUSE_WEATHER_FALLBACK, &found)) {
-                    place = found;
-                    src = SRC_DEFAULT;
-                    s_located_us = now;
-                    located = true;
-                }
-                next_ip = now + (src == SRC_NONE ? RETRY_US : WEATHER_PERIOD_US);
+                next_ip = now + (have_ip ? WEATHER_PERIOD_US : RETRY_US);
             }
         }
-        if (src != SRC_NONE && (located || now >= next_weather)) {
+        source_t want = SRC_NONE;
+        if (muse_fresh) {
+            want = SRC_MUSE;
+            found = from_muse;
+            s_located_us = muse_at;
+        } else if (have_ip) {
+            want = SRC_IP;
+            found = from_ip;
+            s_located_us = ip_at;
+        } else if (have_muse) {
+            want = SRC_MUSE;
+            found = from_muse;
+            s_located_us = muse_at;
+        } else if (parse_place(CONFIG_MUSE_WEATHER_FALLBACK, &found)) {
+            want = SRC_DEFAULT;
+            if (!default_at) {
+                default_at = now;
+            }
+            s_located_us = default_at;
+        }
+        bool changed = want != SRC_NONE && (want != src || strcmp(found.name, place.name) != 0 ||
+                                            found.lat != place.lat || found.lon != place.lon);
+        if (changed) {
+            place = found;
+            src = want;
+        }
+        if (src != SRC_NONE && (changed || now >= next_weather)) {
             next_weather = now + (fetch_weather(&place, src) ? WEATHER_PERIOD_US : RETRY_US);
         }
         vTaskDelay(pdMS_TO_TICKS(POLL_MS));

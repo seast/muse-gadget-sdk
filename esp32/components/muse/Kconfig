@@ -479,9 +479,10 @@ menu "Muse"
             A line under the status line with where the gadget is and the
             weather there, such as "San Jose 18°C Cloudy". The location comes
             from Muse: twice a day the gadget asks it, as a message in the
-            chat you can see in the Muse app, where you are. If Muse can't
-            tell, the location comes from the network's public IP address
-            (ipinfo.io), and failing that it's the fallback city below. It
+            chat you can see in the Muse app, where you are, and uses its
+            answer for 30 minutes. Otherwise the location comes from the
+            network's public IP address (ipinfo.io), then Muse's older answer,
+            and failing those it's the fallback city below. It
             asks again, and fetches the weather, when the gadget joins another
             Wi-Fi network or is plugged in, once 30 minutes have passed since
             the last check. The line ends with (M), (I) or (F) for which it

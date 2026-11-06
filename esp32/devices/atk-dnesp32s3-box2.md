@@ -62,9 +62,10 @@ Muse's sessions need. These are off unless the build's `sdkconfig` (or
 - `CONFIG_MUSE_WEATHER=y`: a line under the status line with the location and
   weather, such as `San Jose 18°C Cloudy`. Twice a day the box asks Muse where
   you are, as a typed message that shows in the Muse app's chat; a press of M
-  takes priority and the question waits for the next try. If Muse can't tell,
-  the location comes from the network's public IP (ipinfo.io), and failing
-  that from `CONFIG_MUSE_WEATHER_FALLBACK` (`San Jose`). Joining another
+  takes priority and the question waits for the next try. Muse's answer is
+  used for 30 minutes; after that, or if Muse can't tell, the location comes
+  from the network's public IP (ipinfo.io), then Muse's older answer, and
+  failing those from `CONFIG_MUSE_WEATHER_FALLBACK` (`San Jose`). Joining another
   Wi-Fi network or plugging in (USB from a computer, or a charger while the
   battery charges) checks the location and weather again, once 30 minutes
   have passed since the last check; sooner, the check waits for the 30
