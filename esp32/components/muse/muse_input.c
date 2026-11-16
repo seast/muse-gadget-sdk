@@ -48,6 +48,9 @@
 #endif
 #include "muse_state.h"
 #include "muse_ui.h"
+#if CONFIG_MUSE_LATEST_REPLY
+#include "muse_latest_reply.h"
+#endif
 #include "muse_voice.h"
 #include "muse_wifi.h"
 #if CONFIG_MUSE_VIDEO
@@ -56,6 +59,9 @@
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
 #include "muse_review.h"
 #include "muse_wheel.h"
+#endif
+#if CONFIG_MUSE_APP_VIEW
+#include "muse_app_view.h"
 #endif
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
@@ -640,6 +646,13 @@ static void power_release(void)
 {
     if (!s_power_down) return;
     s_power_down = false;
+#if CONFIG_MUSE_APP_VIEW
+    /* With an app open, the power key closes it instead of sleeping the screen. */
+    if (!s_power_swallow && muse_app_view_power()) {
+        s_power_swallow = false;
+        return;
+    }
+#endif
 #if CONFIG_MUSE_CLOCK_SCREEN && !CONFIG_MUSE_CLOCK_MAIN
     if (!s_power_swallow && !muse_ui_clock()) {
         ESP_LOGI(TAG, "clock (%s)", muse_board->power_button);
@@ -727,6 +740,12 @@ static void input_task(void *arg)
             muse_video_close();
             ev &= ~(presses | MUSE_BTN_POWER_LONG);
         }
+#endif
+#if CONFIG_MUSE_APP_VIEW
+        /* An open app takes the talk, speaker and aux buttons; the power key still closes it.
+         * A toggled voice note that's recording keeps the talk key: its next press stops it. */
+        unsigned keep = NOTE_TOGGLED() ? ev & (MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_RELEASE) : 0;
+        ev = muse_app_view_buttons(ev & ~keep) | keep;
 #endif
         if (ev & (MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_RELEASE)) {
             ESP_LOGI(TAG, "talk key:%s%s", ev & MUSE_BTN_TALK_PRESS ? " press" : "",
@@ -1001,6 +1020,12 @@ static bool console_command(char *line, bool whole)
         return true;
     }
 #if LV_USE_SNAPSHOT
+#if CONFIG_MUSE_LATEST_REPLY
+    if (muse_latest_reply_bench(line)) {
+        set_asleep(false, "reply review");
+        return true;
+    }
+#endif
     if (!strcmp(line, "ui.demo=1") || !strcmp(line, "ui.demo=0")) {
         muse_ui_bench_demo(!strcmp(line, "ui.demo=1"));
         return true;
