@@ -23,10 +23,11 @@
  * rails, the charger lines and keys L, M and Q; key R is GPIO0 (BOOT). Pins,
  * the panel's init table, the expander's lines and the battery table follow
  * xiaozhi-esp32's alientek/atk-dnesp32s3-box2-wifi board (config.h,
- * atk_dnesp32s3_box2.cc, power_manager.h). M is talk, R steps the menu, L turns the speaker on and
- * off and Q is power: a tap sleeps or wakes, a 2 s hold powers off. An SC7A20
- * accelerometer at 0x19, found on a unit (xiaozhi doesn't use it), turns the
- * picture the right way up as the box turns, landscape or portrait.
+ * atk_dnesp32s3_box2.cc, power_manager.h). M is talk, R steps the menu, L
+ * turns the speaker on and off and Q is power: a tap sleeps or wakes, a 2 s
+ * hold powers off. An SC7A20 accelerometer at 0x19, found on a unit (xiaozhi
+ * doesn't use it), turns the picture the right way up as the box turns,
+ * landscape or portrait.
  */
 #include <stdlib.h>
 
@@ -91,9 +92,10 @@ static const char *TAG = "board";
 /* Port 0: P0.3 and P0.4 (SBU2, SBU1) are outputs, the rest inputs. */
 #define XL_CFG0 0xE7
 #define XL_KEY_L (1u << 5)         /* active low */
-#define XL_KEY_Q (1u << 6)         /* in xiaozhi's list, unused there; checked on a unit */
+#define XL_KEY_Q (1u << 6)         /* active low on USB and battery; in xiaozhi's list, unused there */
 #define XL_KEY_M (1u << 7)         /* active high */
 #define POWER_HOLD_US 2000000      /* Q held this long powers off */
+#define KEYS_UP_WAIT_MS 5000       /* the longest power_off() waits for the keys to come up */
 /* Port 1: P1.0 to P1.5 outputs, P1.6 and P1.7 inputs. */
 #define XL_CFG1 0xC0
 #define XL_USB_SEL (1u << 0)
@@ -148,7 +150,6 @@ typedef struct {
     uint8_t stable;
 } xl_key_t;
 static xl_key_t s_m, s_l, s_q;
-static uint8_t s_keys_idle;         /* port 0 at boot, keys up: L and Q read the other way pressed */
 static int64_t s_q_down_us;         /* when Q went down, for the power-off hold */
 static bool s_q_long;               /* and the hold's been reported */
 static lv_display_t *s_disp;
@@ -182,8 +183,37 @@ static esp_err_t xl_set(uint8_t mask, bool on)
     return err;
 }
 
+static bool m_down(uint8_t p0)
+{
+    return (p0 & XL_KEY_M) != 0;
+}
+
+static bool l_down(uint8_t p0)
+{
+    return (p0 & XL_KEY_L) == 0;
+}
+
+static bool q_down(uint8_t p0)
+{
+    return (p0 & XL_KEY_Q) == 0;
+}
+
+/* A key held at boot (M switched the box on, or a key woke it) is a press
+ * already under way: letting it go isn't a press, and Q's hold doesn't
+ * count toward powering off. */
+static void keys_at_boot(uint8_t p0)
+{
+    s_m.pressed = m_down(p0);
+    s_l.pressed = l_down(p0);
+    s_q.pressed = q_down(p0);
+    s_q_long = s_q.pressed;
+}
+
 static esp_err_t init(void)
 {
+    /* power_off() holds the backlight low through deep sleep; let it go. */
+    gpio_hold_dis(LCD_BL);
+    gpio_deep_sleep_hold_dis();
     rtc_gpio_deinit(AUX_GPIO);
     rtc_gpio_deinit(XL_INT_GPIO);
     const i2c_master_bus_config_t i2c_cfg = {
@@ -217,7 +247,7 @@ static esp_err_t init(void)
     ESP_RETURN_ON_ERROR(xl_write(XL9555_CFG0, XL_CFG0), TAG, "xl9555 dir");
     uint8_t in[2];
     ESP_RETURN_ON_ERROR(xl_read2(XL9555_IN0, in), TAG, "xl9555 read");
-    s_keys_idle = in[0];
+    keys_at_boot(in[0]);
 
     const adc_oneshot_unit_init_cfg_t adc_cfg = { .unit_id = ADC_UNIT_1 };
     ESP_RETURN_ON_ERROR(adc_oneshot_new_unit(&adc_cfg, &s_adc), TAG, "adc");
@@ -546,16 +576,17 @@ static unsigned poll_expander(void)
 {
     uint8_t in[2];
     if (xl_read2(XL9555_IN0, in) != ESP_OK) {
+        s_q_down_us = esp_timer_get_time();   /* a failed read never counts toward the hold */
         return 0;
     }
-    unsigned ev = debounce(&s_m, (in[0] & XL_KEY_M) != 0, MUSE_BTN_TALK_PRESS, MUSE_BTN_TALK_RELEASE);
-    ev |= debounce(&s_l, (in[0] ^ s_keys_idle) & XL_KEY_L, MUSE_BTN_SPEAKER_PRESS, MUSE_BTN_SPEAKER_RELEASE);
-    unsigned q = debounce(&s_q, (in[0] ^ s_keys_idle) & XL_KEY_Q, MUSE_BTN_POWER_PRESS, MUSE_BTN_POWER_RELEASE);
+    unsigned ev = debounce(&s_m, m_down(in[0]), MUSE_BTN_TALK_PRESS, MUSE_BTN_TALK_RELEASE);
+    ev |= debounce(&s_l, l_down(in[0]), MUSE_BTN_SPEAKER_PRESS, MUSE_BTN_SPEAKER_RELEASE);
+    unsigned q = debounce(&s_q, q_down(in[0]), MUSE_BTN_POWER_PRESS, MUSE_BTN_POWER_RELEASE);
     if (q & MUSE_BTN_POWER_PRESS) {
         s_q_down_us = esp_timer_get_time();
         s_q_long = false;
     }
-    if (s_q.pressed && !s_q_long && esp_timer_get_time() - s_q_down_us >= POWER_HOLD_US) {
+    if (s_q.pressed && q_down(in[0]) && !s_q_long && esp_timer_get_time() - s_q_down_us >= POWER_HOLD_US) {
         s_q_long = true;
         q |= MUSE_BTN_POWER_LONG;
     }
@@ -640,14 +671,19 @@ static esp_err_t power_off(void)
         esp_codec_dev_close(s_mic);
     }
     xl_set(XL_SPK_EN, false);
-    /* Wait for the keys to come up, so the latch isn't held by M or Q. */
+    /* Wait for the keys to come up, so the latch isn't held by M or Q, but
+     * not forever: a key still held keeps battery power on only until it's
+     * let go. */
     uint8_t in[2] = { 0 };
-    do {
+    for (int waited = 0; waited < KEYS_UP_WAIT_MS; waited += 20) {
         vTaskDelay(pdMS_TO_TICKS(20));
-    } while (gpio_get_level(AUX_GPIO) == 0 ||
-             (xl_read2(XL9555_IN0, in) == ESP_OK && ((in[0] & XL_KEY_M) || ((in[0] ^ s_keys_idle) & XL_KEY_Q))));
+        if (gpio_get_level(AUX_GPIO) != 0 &&
+            (xl_read2(XL9555_IN0, in) != ESP_OK || (!m_down(in[0]) && !q_down(in[0])))) {
+            break;
+        }
+    }
     /* As xiaozhi powers off: CHG_CTRL low, then the latch open. That cuts
-     * battery power; USB power keeps the chip running. */
+     * power, on USB too (checked on a unit); M switches the box back on. */
     xSemaphoreTake(s_xl_lock, portMAX_DELAY);
     s_xl_out1 &= ~XL_CHG_CTRL;
     s_xl_cfg1 &= ~XL_CHG_CTRL;
@@ -658,11 +694,11 @@ static esp_err_t power_off(void)
     xl_set(XL_SYS_POW, false);
     vTaskDelay(pdMS_TO_TICKS(500));
 
-    /* Still here, so on USB: deep sleep until R or a change on the expander
-     * (M, which pulls its interrupt low). CHG_CTRL goes back to an input, as
-     * xiaozhi leaves it, so the battery charges meanwhile; reading the inputs
-     * then clears the interrupt. */
-    ESP_LOGI(TAG, "on USB power: deep sleep");
+    /* Still here only if the latch didn't cut power: deep sleep until R or a
+     * change on the expander (M, Q, L or CHRG, which pull its interrupt low).
+     * CHG_CTRL goes back to an input, as xiaozhi leaves it, so the battery
+     * charges meanwhile; reading the inputs then clears the interrupt. */
+    ESP_LOGI(TAG, "still powered after the latch: deep sleep");
     xSemaphoreTake(s_xl_lock, portMAX_DELAY);
     s_xl_cfg1 |= XL_CHG_CTRL;
     xl_write(XL9555_CFG1, s_xl_cfg1);

@@ -40,7 +40,7 @@ python -m esptool --chip esp32s3 -p PORT read-flash 0 0x1000000 atk-box2-factory
 
 ### Options
 
-The overlay keeps the avatar's and audio's static buffers (about 18 KB) in
+The overlay keeps the avatar's and audio's static buffers (about 17 KB) in
 PSRAM (`CONFIG_MUSE_STATIC_BUFFERS_IN_PSRAM`), for the internal RAM Link and
 Muse's sessions need. These are off unless the build's `sdkconfig` (or
 `idf.py -B build-muse-atk-dnesp32s3-box2 menuconfig`) turns them on:
@@ -113,11 +113,13 @@ Muse's sessions need. These are off unless the build's `sdkconfig` (or
   select in the menu.
 - R (BOOT, GPIO0): opens the menu and steps down it. Held at reset it enters
   the ROM bootloader, as on any S3.
-- L (XL9555 P0.5): turns the speaker on and off.
-- Q (XL9555 P0.6, listed by xiaozhi but unused there): power. A tap turns
-  the screen off or on (with `CONFIG_MUSE_CLOCK_SCREEN`, shows the clock
-  first, unless it's `CONFIG_MUSE_CLOCK_MAIN`), a 2 s hold powers off. Its resting level is read at
-  boot, so either polarity works.
+- L (XL9555 P0.5, active low): turns the speaker on and off.
+- Q (XL9555 P0.6, active low; listed by xiaozhi but unused there): power. A
+  tap turns the screen off or on (with `CONFIG_MUSE_CLOCK_SCREEN`, shows the
+  clock first, unless it's `CONFIG_MUSE_CLOCK_MAIN`), a 2 s hold powers off.
+- A key still held at boot (M switches the box on from off) is a press
+  already under way: letting it go does nothing, and Q held then
+  doesn't count toward powering off.
 
 ## Screen
 
@@ -144,10 +146,13 @@ Muse's sessions need. These are off unless the build's `sdkconfig` (or
 
 ## Power and limits
 
-- Power off, on battery, drives CHG_CTRL low and opens the power latch
-  (XL9555 P1.2), as xiaozhi does. On USB power the chip keeps running, so it
-  falls back to deep sleep with the backlight and amplifier off; R, or M or Q
-  through the expander's interrupt on GPIO2, wakes it.
+- Power off drives CHG_CTRL low and opens the power latch (XL9555 P1.2), as
+  xiaozhi does. That cuts power on USB as well as on battery, and M switches
+  the box back on (on USB, R and Q don't). Should a box stay powered with
+  the latch open, it falls back to deep sleep with the backlight and
+  amplifier off, woken by R, or by M or Q through the expander's interrupt
+  on GPIO2. That interrupt follows every expander input, so the charger
+  finishing (CHRG) or key L would wake it too.
 - The battery percentage comes from xiaozhi's table of raw ADC counts; no
   voltage is reported. Charging is the charger's CHRG line (P1.7). While
   charging, the reading is raised by the charge current.
@@ -159,7 +164,7 @@ Muse's sessions need. These are off unless the build's `sdkconfig` (or
 
 ## Hardware verification
 
-Checked on one unit, powered over USB:
+Checked on one unit, powered over USB unless it says battery:
 
 - Boot reports the board name and 8 MB PSRAM, with no panic or reset loop.
 - BLE pairing with the Muse app (with an SDK token in the build), Wi-Fi and
@@ -167,7 +172,12 @@ Checked on one unit, powered over USB:
   `int=34K/23K min=19K` once Muse connected.
 - The speaker plays the built-in MP3 (console key `m`) and the
   `>test.loopback` tones; the mic records voice notes that reach Muse.
-- Keys M, R, L and Q as above.
+- Keys M, R, L and Q as above. Port 0 reads 0x7F with every key up, on USB
+  and on battery alike: L and Q high, M low.
+- On battery: a 2 s hold of Q powers off, M switches the box back on, and it
+  stays on once M is let go.
+- On USB, power off cuts power too (the USB device goes away within 2 s), and
+  only M switches the box back on.
 - The picture turns with the box, all four ways up, and the key icons sit
   along the keys' edge each way.
 
@@ -176,11 +186,8 @@ Still to check:
 1. The 40-line strips in PSRAM: the picture whole, with no `Draw bitmap
    failed` in the log, and internal RAM through a live call and a voice note
    (`min=` in the heartbeat should stay above about 8K).
-2. A boot on battery: the board stays on after the power key is released.
-3. Playback after the audio has rested on battery (asleep, unplugged) and
+2. Playback after the audio has rested on battery (asleep, unplugged) and
    reopened: xiaozhi keeps the ES8389's output open for fear that reopening
    the duplex bus leaves it silent on IDF 6. On USB the audio never rests.
-4. The menu: volume changes and is kept across a restart.
-5. Battery: the percentage and the charging state.
-6. Power off on battery, and which key turns it back on; on USB, deep sleep
-   and waking on R, M and Q.
+3. The menu: volume changes and is kept across a restart.
+4. Battery: the percentage and the charging state.
